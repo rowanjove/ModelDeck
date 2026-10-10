@@ -147,6 +147,8 @@ pub fn run() {
             commands::storage_inspect,
             commands::storage_clean,
             commands::db_integrity_check,
+            commands::db_backup,
+            commands::db_verify_backup,
             commands::diagnostics_run,
             commands::diagnostics_export_bundle,
             commands::logs_list,

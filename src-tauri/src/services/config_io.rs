@@ -77,14 +77,24 @@ pub async fn export_all_config(pool: &SqlitePool) -> Result<ExportedConfig, AppE
     // Sanitize providers: NEVER export API keys / credentials!
     let exported_providers = providers_records
         .into_iter()
-        .map(|p| ExportedProvider {
-            id: p.id,
-            name: p.name,
-            provider_type: p.provider_type,
-            base_url: p.base_url,
-            headers: crate::redact::redact_header_map(&p.headers),
-            timeout_ms: p.timeout_ms,
-            enabled: p.enabled,
+        .map(|p| {
+            let mut sanitized_headers = BTreeMap::new();
+            for (k, v) in p.headers {
+                if crate::redact::is_sensitive_key(&k) {
+                    sanitized_headers.insert(k.clone(), sanitize_sensitive_header(&k, &v));
+                } else {
+                    sanitized_headers.insert(k, v);
+                }
+            }
+            ExportedProvider {
+                id: p.id,
+                name: p.name,
+                provider_type: p.provider_type,
+                base_url: p.base_url,
+                headers: sanitized_headers,
+                timeout_ms: p.timeout_ms,
+                enabled: p.enabled,
+            }
         })
         .collect();
 
@@ -471,5 +481,122 @@ mod tests {
             sanitize_sensitive_header("Authorization", "{{apiKey}}"),
             "{{apiKey}}"
         );
+    }
+
+    #[tokio::test]
+    async fn export_config_never_contains_actual_secrets() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::migrate(&pool).await.unwrap();
+
+        let mut headers = std::collections::BTreeMap::new();
+        headers.insert(
+            "Authorization".to_string(),
+            "Bearer secret-live-token".to_string(),
+        );
+        headers.insert("X-API-Key".to_string(), "top-secret-key".to_string());
+        let provider = crate::domain::ProviderRecord {
+            id: "p1".to_string(),
+            name: "Provider 1".to_string(),
+            provider_type: crate::domain::ProviderType::Openai,
+            base_url: "https://api.openai.com/v1".to_string(),
+            credential_id: Some("cred-1".to_string()),
+            headers,
+            timeout_ms: 30000,
+            enabled: true,
+            created_at: crate::domain::now_iso(),
+            updated_at: crate::domain::now_iso(),
+        };
+        crate::db::insert_provider(&pool, &provider).await.unwrap();
+
+        let exported = super::export_all_config(&pool).await.unwrap();
+        let exp_p = exported
+            .providers
+            .into_iter()
+            .find(|p| p.id == "p1")
+            .unwrap();
+        assert_eq!(
+            exp_p.headers.get("Authorization").unwrap(),
+            "Bearer {{apiKey}}"
+        );
+        assert_eq!(exp_p.headers.get("X-API-Key").unwrap(), "{{apiKey}}");
+    }
+
+    #[tokio::test]
+    async fn import_config_disconnects_and_cleans_credential_when_url_changes() {
+        use crate::credentials::SecretStore;
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::migrate(&pool).await.unwrap();
+
+        let secrets = crate::credentials::MemorySecretStore::default();
+        secrets.set("cred-url-test", "sk-secret-abc").unwrap();
+
+        let provider = crate::domain::ProviderRecord {
+            id: "prov-url".to_string(),
+            name: "Old Provider".to_string(),
+            provider_type: crate::domain::ProviderType::Openai,
+            base_url: "https://api.old-url.com/v1".to_string(),
+            credential_id: Some("cred-url-test".to_string()),
+            headers: std::collections::BTreeMap::new(),
+            timeout_ms: 30000,
+            enabled: true,
+            created_at: crate::domain::now_iso(),
+            updated_at: crate::domain::now_iso(),
+        };
+        crate::db::insert_provider(&pool, &provider).await.unwrap();
+
+        // 1. 导入相同 URL：保留凭据绑定
+        let config_same_url = super::ExportedConfig {
+            version: "1.0".to_string(),
+            exported_at: crate::domain::now_iso(),
+            providers: vec![super::ExportedProvider {
+                id: "prov-url".to_string(),
+                name: "Updated Name".to_string(),
+                provider_type: crate::domain::ProviderType::Openai,
+                base_url: "https://api.old-url.com/v1".to_string(),
+                headers: std::collections::BTreeMap::new(),
+                timeout_ms: 30000,
+                enabled: true,
+            }],
+            models: vec![],
+            presets: vec![],
+        };
+        super::import_config(&pool, &secrets, config_same_url)
+            .await
+            .unwrap();
+        let p = crate::db::get_provider(&pool, "prov-url").await.unwrap();
+        assert_eq!(p.credential_id.as_deref(), Some("cred-url-test"));
+        assert!(secrets.get("cred-url-test").unwrap().is_some());
+
+        // 2. 导入不同 URL：解除旧凭据绑定并从 store 中删除孤儿凭据，防泄露至新地址
+        let config_new_url = super::ExportedConfig {
+            version: "1.0".to_string(),
+            exported_at: crate::domain::now_iso(),
+            providers: vec![super::ExportedProvider {
+                id: "prov-url".to_string(),
+                name: "Updated Name".to_string(),
+                provider_type: crate::domain::ProviderType::Openai,
+                base_url: "https://api.new-url.com/v1".to_string(),
+                headers: std::collections::BTreeMap::new(),
+                timeout_ms: 30000,
+                enabled: true,
+            }],
+            models: vec![],
+            presets: vec![],
+        };
+        super::import_config(&pool, &secrets, config_new_url)
+            .await
+            .unwrap();
+        let p_updated = crate::db::get_provider(&pool, "prov-url").await.unwrap();
+        assert_eq!(p_updated.credential_id, None);
+        assert!(secrets.get("cred-url-test").unwrap().is_none());
     }
 }

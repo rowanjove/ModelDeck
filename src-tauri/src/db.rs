@@ -682,6 +682,58 @@ pub async fn integrity_check(pool: &SqlitePool) -> Result<Vec<String>, AppError>
     Ok(results)
 }
 
+pub async fn safe_backup(pool: &SqlitePool, target_path: &Path) -> Result<(), AppError> {
+    if let Some(parent) = target_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| AppError::storage(format!("无法创建备份目标目录: {e}")))?;
+    }
+    if target_path.exists() {
+        tokio::fs::remove_file(target_path)
+            .await
+            .map_err(|e| AppError::storage(format!("无法清理已存在的旧备份文件: {e}")))?;
+    }
+
+    // 1. 先执行 TRUNCATE checkpoint，将 WAL 日志页面合并入主库
+    let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(pool)
+        .await;
+
+    // 2. 通过 VACUUM INTO 制作合并后的只读一致快照
+    let target_str = target_path.to_string_lossy().replace('\'', "''");
+    let vacuum_sql = format!("VACUUM INTO '{target_str}'");
+    sqlx::raw_sql(&vacuum_sql)
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::storage(format!("安全数据库快照备份失败: {e}")))?;
+
+    // 3. 对新生成的备份文件执行完整性校验
+    verify_backup_file(target_path).await?;
+    Ok(())
+}
+
+pub async fn verify_backup_file(backup_path: &Path) -> Result<(), AppError> {
+    if !backup_path.exists() {
+        return Err(AppError::not_found("备份文件不存在"));
+    }
+    let pool = open(backup_path).await?;
+    let checks = integrity_check(&pool).await?;
+    if checks.len() != 1 || checks[0] != "ok" {
+        return Err(AppError::storage(format!(
+            "备份文件完整性检验失败: {:?}",
+            checks
+        )));
+    }
+    let fk_rows = sqlx::query("PRAGMA foreign_key_check")
+        .fetch_all(&pool)
+        .await
+        .map_err(AppError::db)?;
+    if !fk_rows.is_empty() {
+        return Err(AppError::storage("备份文件存在外键约束违规"));
+    }
+    Ok(())
+}
+
 pub async fn sync_fts_entry(
     pool: &SqlitePool,
     entity_id: &str,
@@ -782,4 +834,68 @@ pub async fn is_comfyui_model(pool: &SqlitePool, model_id: &str) -> bool {
     .flatten();
 
     matches!(row.as_ref().map(|(t,)| t.as_str()), Some("comfyui"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_safe_backup_and_integrity_check() {
+        let temp_dir = std::env::temp_dir().join(format!("ai-wb-test-db-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        let db_path = temp_dir.join("live.db");
+        let pool = open(&db_path).await.unwrap();
+        migrate(&pool).await.unwrap();
+
+        // 写入测试数据
+        let provider = ProviderRecord {
+            id: "test-prov-1".to_string(),
+            name: "Test Provider".to_string(),
+            provider_type: ProviderType::Openai,
+            base_url: "https://api.openai.com/v1".to_string(),
+            credential_id: None,
+            headers: std::collections::BTreeMap::new(),
+            timeout_ms: 30000,
+            enabled: true,
+            created_at: now_iso(),
+            updated_at: now_iso(),
+        };
+        insert_provider(&pool, &provider).await.unwrap();
+
+        // 执行 WAL 安全快照备份
+        let backup_path = temp_dir.join("backup.db");
+        safe_backup(&pool, &backup_path).await.unwrap();
+
+        // 验证备份文件通过完整性检查
+        verify_backup_file(&backup_path).await.unwrap();
+
+        // 验证备份中能读取到刚才写入的数据
+        let backup_pool = open(&backup_path).await.unwrap();
+        let retrieved = get_provider(&backup_pool, "test-prov-1").await.unwrap();
+        assert_eq!(retrieved.name, "Test Provider");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_verify_corrupted_backup_rejected() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ai-wb-test-db-bad-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        let bad_path = temp_dir.join("bad.db");
+        // 写入非合法的伪造数据
+        tokio::fs::write(&bad_path, b"not a valid sqlite database header at all")
+            .await
+            .unwrap();
+
+        let err = verify_backup_file(&bad_path).await.unwrap_err();
+        assert!(
+            err.message.contains("完整性检验失败")
+                || err.message.contains("数据库")
+                || err.message.contains("database")
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
 }

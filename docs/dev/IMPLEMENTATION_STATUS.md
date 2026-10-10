@@ -37,7 +37,7 @@
 | **D05** | 工作流引擎仅线性循环，非 DAG | **静态确认** | `src-tauri/src/services/pipeline.rs` | `pipeline.rs` 374 行使用 `for (index, step) in input.steps.iter().enumerate()` 顺序遍历执行，无拓扑排序、条件分支或并行调度。 |
 | **D06** | Tauri asset 协议范围过度放宽 (`["**"]`) | **已修复** | `src-tauri/tauri.conf.json`<br>`src-tauri/src/commands.rs`<br>`docs/dev/RELEASE_SMOKE_TEST.md` | 收紧 `assetProtocol.scope`，排除系统与敏感根目录，仅允许应用数据目录与用户合法个人媒体目录；IPC 文件读取/保存命令全量增加路径越界与应用数据目录覆盖防护；发布冒烟验证通过。 |
 | **D07** | 代码库缺失 GitHub Actions CI 流水线 | **已修复** | `.github/workflows/ci.yml` | 补齐 GitHub Actions 自动化质量门禁与 Windows 发布流水线；包含依赖锁定安装、TypeScript 类型检查、Biome Lint、Vitest 测试、前端构建、Cargo 格式化、Clippy 严格检查 (-D warnings) 与全套测试套件运行。 |
-| **D08** | 遗留 `ai-workbench` / `local.aiworkbench` 标识 | **静态确认** | `src-tauri/Cargo.toml`<br>`src-tauri/src/credentials.rs` | `Cargo.toml` 中 `name = "ai-workbench"`，`credentials.rs` 中凭据服务名为 `local.aiworkbench`；直接改名可能破坏用户已保存的系统凭据。 |
+| **D08** | 遗留 `ai-workbench` / `local.aiworkbench` 标识 | **已解决** | `src-tauri/src/credentials.rs` | 落地双轨透明迁移方案：`PRIMARY_SERVICE = "local.modeldeck"` 与 `LEGACY_SERVICE = "local.aiworkbench"`。读取优先查主服务名，未命中回退旧服务名并静默写回新服务名；删除时双清旧新凭据，平滑兼容且不破坏历史凭据。 |
 
 ---
 
@@ -54,7 +54,7 @@
 | **T06** | M2 | P1 | GitHub Actions 与自动质量门禁 | **DONE** | `.github/workflows/ci.yml` | 建立 Windows 自动化质量门禁与发布演练工作流，包含类型检查、双端测试、Clippy 严格门禁、构建验证与 SHA256 校验和生成。 |
 | **T07** | M2 | P1 | Provider 契约测试及兼容矩阵 | **DONE** | `src-tauri/src/adapters/`<br>`src-tauri/src/integration_tests.rs`<br>`docs/dev/PROVIDER_COMPATIBILITY.md` | 产出详尽的 Provider × 模态 × 功能兼容性矩阵文档；划分 L1~L4 验证等级并消除不实断言；新增 Ollama 通信与连接探测、DeepSeek 思考链 (Reasoning)、Anthropic/Gemini 401/400 鉴权错误脱敏转换、音频与视频模型能力防呆门禁等 4 项核心契约测试（Rust 测试增至 145 项全绿）。 |
 | **T08** | M2 | P1 | 任务超时、取消、下载与重试一致性 | **DONE** | `src-tauri/src/services/job_queue.rs`<br>`image.rs`<br>`video.rs`<br>`audio.rs`<br>`src/types.ts`<br>`migrations/022_task_consistency_fields.sql` | 统一任务生命周期数据模型（新增 `errorCode`, `retryable`, `remoteJobId`, `billingRisk`）；明确细分四类超时（建连、提交未决、远端生成中、下载保存）并对应差异化重试与计费提示；明确取消语义与计费风险（排队取消零费用，运行中取消提示“客户端已停止等待，远端可能继续计费”）；图像/视频/音频全模态实施 0 字节与损坏格式原子拦截并清理残存中间文件；增量迁移 022 持久化一致性字段；9 项新增专项测试全绿，全量 154 项 Rust 测试通过。 |
-| **T09** | M2 | P1 | 数据持久化、凭据及备份恢复 | **TODO** | `src-tauri/src/db.rs`<br>`credentials.rs`<br>`services/config_io.rs` | SQLite WAL 校验、系统凭据兼容平滑迁移。 |
+| **T09** | M2 | P1 | 数据持久化、凭据及备份恢复 | **DONE** | `src-tauri/src/db.rs`<br>`credentials.rs`<br>`services/config_io.rs`<br>`commands.rs`<br>`lib.rs` | 确立系统凭据 `local.modeldeck` 与 `local.aiworkbench` 双轨平滑迁移（解决 D08）；实现 SQLite WAL 安全快照备份（`wal_checkpoint(TRUNCATE)` + `VACUUM INTO`）与备份文件完整性及外键校验（`verify_backup_file`）；暴露带受控白名单校验的 `db_backup` 和 `db_verify_backup` IPC 命令；配置导出绝不泄露 API Key 并杜绝日志前缀截断泄露；导入时检测 Base URL 变化自动切断旧凭据。全量 160 项 Rust 测试通过。 |
 | **T10** | M2 | P1 | 可复现的发布流程 | **TODO** | `RELEASE_CHECKLIST.md`<br>发布工作流与打包脚本 | 统一版本号、产物哈希比对与发布清单。 |
 | **T11** | M3 | P2 | 首次使用向导与“第一个结果”路径 | **TODO** | `src/features/settings/`<br>`ModelsView.tsx`<br>`Shell.tsx` | 新用户快速上手体验引导与连通性自测。 |
 | **T12** | M3 | P2 | 统一资产元数据、复用与溯源 | **TODO** | `services/history.rs`<br>`services/search.rs`<br>`AssetLibraryView.tsx` | 跨模态资产复用与生成来源追溯。 |

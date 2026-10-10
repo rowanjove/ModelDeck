@@ -1239,6 +1239,21 @@ pub async fn db_integrity_check(state: State<'_, AppState>) -> Result<Vec<String
     crate::db::integrity_check(&state.db).await
 }
 
+#[tauri::command]
+pub async fn db_backup(state: State<'_, AppState>, target_path: String) -> Result<(), AppError> {
+    let path = std::path::PathBuf::from(&target_path);
+    if let Some(parent) = path.parent() {
+        crate::storage_util::ensure_dir_writable(parent)?;
+    }
+    crate::db::safe_backup(&state.db, &path).await
+}
+
+#[tauri::command]
+pub async fn db_verify_backup(backup_path: String) -> Result<(), AppError> {
+    let path = std::path::PathBuf::from(&backup_path);
+    crate::db::verify_backup_file(&path).await
+}
+
 // 18. Hardening: Diagnostics & Diagnostic Bundle Export
 #[tauri::command]
 pub async fn diagnostics_run(

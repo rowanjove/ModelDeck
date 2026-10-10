@@ -16,20 +16,26 @@ import { UnifiedSearchView } from "./UnifiedSearchView";
 const STATUSES = [
   { id: "", label: "全部状态" },
   { id: "queued", label: "排队" },
+  { id: "submitting", label: "提交中" },
   { id: "running", label: "进行中" },
+  { id: "downloading", label: "下载中" },
   { id: "completed", label: "完成" },
   { id: "failed", label: "失败" },
   { id: "cancelled", label: "已取消" },
   { id: "interrupted", label: "已中断" },
+  { id: "unknown_submission", label: "提交未决" },
 ];
 
 const STATUS_LABELS: Record<string, string> = {
   queued: "排队",
+  submitting: "提交中",
   running: "进行中",
+  downloading: "下载中",
   completed: "完成",
   failed: "失败",
   cancelled: "已取消",
   interrupted: "已中断",
+  unknown_submission: "提交未决",
 };
 
 export function HistoryView({

@@ -1269,7 +1269,8 @@ legend {
 }
 
 .status-cancelled,
-.status-interrupted {
+.status-interrupted,
+.status-unknown_submission {
   color: var(--muted);
 }
 

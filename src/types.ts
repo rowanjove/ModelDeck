@@ -1134,13 +1134,16 @@ export interface TaskEvent {
   taskId: string;
   eventType:
     | "queued"
+    | "submitting"
     | "started"
     | "progress"
     | "intermediate"
+    | "downloading"
     | "completed"
     | "failed"
     | "cancelled"
-    | "interrupted";
+    | "interrupted"
+    | "unknown_submission";
   modality: string;
   status: string;
   progress?: number | null;

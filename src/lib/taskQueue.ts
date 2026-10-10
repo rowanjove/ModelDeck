@@ -25,6 +25,7 @@ export const useTaskQueueStore = create<TaskQueueState>((set) => ({
         "failed",
         "cancelled",
         "interrupted",
+        "unknown_submission",
       ].includes(event.eventType);
       const activeIds = isTerminal
         ? state.activeIds.filter((id) => id !== event.taskId)
@@ -39,9 +40,13 @@ export const useTaskQueueStore = create<TaskQueueState>((set) => ({
 
       // 终态任务上限保护：最多缓存 MAX_TERMINAL_TASKS 条，超出按时间戳 FIFO 淘汰
       const terminalTaskIds = Object.keys(updatedTasks).filter((id) =>
-        ["completed", "failed", "cancelled", "interrupted"].includes(
-          updatedTasks[id].eventType,
-        ),
+        [
+          "completed",
+          "failed",
+          "cancelled",
+          "interrupted",
+          "unknown_submission",
+        ].includes(updatedTasks[id].eventType),
       );
 
       if (terminalTaskIds.length > MAX_TERMINAL_TASKS) {

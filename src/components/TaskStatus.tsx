@@ -2,14 +2,17 @@ import type { TaskEvent } from "../types";
 
 const labels: Record<string, string> = {
   queued: "排队中",
+  submitting: "提交中",
   running: "生成中",
   started: "生成中",
   progress: "生成中",
   intermediate: "生成中",
+  downloading: "下载中",
   completed: "已完成",
   failed: "失败",
   cancelled: "已取消",
   interrupted: "已中断",
+  unknown_submission: "提交未决",
 };
 
 export function TaskStatus({ task }: { task: TaskEvent | null | undefined }) {

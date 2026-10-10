@@ -11,13 +11,16 @@ use crate::domain::{now_iso, MediaRef, ReferenceImage};
 use crate::error::AppError;
 
 const MODALITIES: [&str; 6] = ["text", "image", "video", "audio", "batch", "pipeline"];
-const STATUSES: [&str; 6] = [
+const STATUSES: [&str; 9] = [
     "queued",
+    "submitting",
     "running",
+    "downloading",
     "completed",
     "failed",
     "cancelled",
     "interrupted",
+    "unknown_submission",
 ];
 const OUTPUT_LIMIT: u64 = 5_000_000;
 
@@ -26,7 +29,7 @@ pub async fn mark_task_cancelled(pool: &SqlitePool, task_id: &str) -> Result<boo
     let res = sqlx::query(
         "UPDATE generation_tasks 
          SET status = 'cancelled', error = '任务已取消', completed_at = ? 
-         WHERE id = ? AND status NOT IN ('completed', 'cancelled', 'failed', 'interrupted')",
+         WHERE id = ? AND status NOT IN ('completed', 'cancelled', 'failed', 'interrupted', 'unknown_submission')",
     )
     .bind(now)
     .bind(task_id)

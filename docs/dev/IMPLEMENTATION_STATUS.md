@@ -32,7 +32,7 @@
 |---|---|---|---|---|
 | **D01** | `registry.rs` 默认 URL 无法访问 | **已修复** | `src-tauri/src/services/registry.rs` | 迁移默认源至仓库维护地址，真实生成 `registry/model-registry.json`；增加 404/离线优雅降级、2MB 流式大小与条目限制、严格 Schema 校验、防版本倒退与原子回滚保护。 |
 | **D02** | Portable 数据路径与文档不一致 | **已修复** | `src-tauri/src/lib.rs`<br>`src-tauri/src/state.rs`<br>`src-tauri/src/storage_util.rs`<br>`README.md`<br>`RELEASE_NOTES_1.0.0.md` | 明确落实“方案 A”：Portable 为免安装绿色版，数据与配置安全留存在 Windows 用户数据目录（`%APPDATA%\local.modeldeck`），密钥由系统 DPAPI 保护；修正 README/Release 文案，在启动时增加存储目录读写权限探测与友好提示，前端增加跨设备配置迁移说明。 |
-| **D03** | 启动崩溃恢复仅简单置为 `interrupted` | **静态确认** | `src-tauri/src/services/task_scheduler.rs` | `recover_tasks_on_startup()` 简单执行 SQL 将所有中间态任务置为 `interrupted`，非真断点续查或区分状态恢复。 |
+| **D03** | 启动崩溃恢复仅简单置为 `interrupted` | **已修复** | `src-tauri/src/services/task_scheduler.rs`<br>`job_queue.rs`<br>`history.rs`<br>`migrations/021_task_recovery_fields.sql` | 彻底废除一刀切置 `interrupted`；细化状态机引入 `unknown_submission`；新增向后兼容增量迁移 021 记录 `remote_job_id`, `remote_poll_url`, `execution_phase`, `billing_risk`；严格区分本地排队安全重试（无扣费风险）、提交未决防自动重发（防重复扣费）、带远端任务 ID 标识（保留 remote ID 续查）、下载中退出（免重复调用生成 API）与终态不可逆。覆盖全部 7 项恢复场景测试全绿。 |
 | **D04** | Agent `run_command` 缺少 OS 沙箱 | **静态确认** | `src-tauri/src/services/agent.rs` | `agent.rs` 依赖静态字符串关键字过滤并在 Windows 上执行 `cmd.exe /C`，容易被绕过且无操作系统级容器/安全隔离。 |
 | **D05** | 工作流引擎仅线性循环，非 DAG | **静态确认** | `src-tauri/src/services/pipeline.rs` | `pipeline.rs` 374 行使用 `for (index, step) in input.steps.iter().enumerate()` 顺序遍历执行，无拓扑排序、条件分支或并行调度。 |
 | **D06** | Tauri asset 协议范围过度放宽 (`["**"]`) | **静态确认** | `src-tauri/tauri.conf.json` | `tauri.conf.json` 中配置 `"assetProtocol": { "enable": true, "scope": ["**"] }`，存在读取本地非预期资产的暴露风险。 |
@@ -48,8 +48,7 @@
 | **T00** | M0 | P0 (阻塞) | 开发基线、验收矩阵与风险清单 | **DONE** | `docs/dev/BASELINE_20261010.md`<br>`docs/dev/IMPLEMENTATION_STATUS.md` | 本地执行全套基线命令（118 Rust + 22 Vitest 测试全绿），建立全流程映射表与 D01—D08 核验矩阵。Commit: `fbd20736efe66516ada3cc7cc42c8c7c22e021fa`。 |
 | **T01** | M1 | P0 | 修复 Registry 默认更新源 | **DONE** | `src-tauri/src/services/registry.rs`<br>`registry/model-registry.json` | 解决默认 URL 404 问题，生成真实合法的仓库维护源文件，实现流式 2MB 限额、Provider/Model/参数多维数量限制、结构校验、版本语义比较防倒退、离线平稳回退及 WireMock 模拟更新/回滚测试（9 项新增测试全绿）。 |
 | **T02** | M1 | P0 | 明确并修复 Portable 数据语义 | **DONE** | `src-tauri/src/state.rs`<br>`src-tauri/src/storage_util.rs`<br>`README.md`<br>`RELEASE_NOTES_1.0.0.md`<br>`ConfigIoView.tsx` | 落实方案 A：将 Portable 明确定义为免安装绿色版，消除“配置保存在本地目录随身携带”的错误表述；启动阶段增加存储目录读写权限探测（`ensure_dir_writable`）与磁盘空间底线拦截；设置页引导通过脱敏配置导出进行跨设备迁移。 |
-
-| **T03** | M1 | P0 | 任务崩溃恢复语义与可恢复机制 | **TODO** | `src-tauri/src/services/task_scheduler.rs`<br>`job_queue.rs` | 区分本地队列与远端任务，避免重复计费与伪恢复。 |
+| **T03** | M1 | P0 | 任务崩溃恢复语义与可恢复机制 | **DONE** | `src-tauri/src/services/task_scheduler.rs`<br>`job_queue.rs`<br>`history.rs`<br>`migrations/021_task_recovery_fields.sql`<br>前端状态组件与映射表 | 实现增量迁移 021 记录关键状态字段；细化恢复逻辑为 5 类策略（本地重排队、提交未决、保留远端 ID 续查、下载中断核验、不可续查提示）；引入 `unknown_submission` 状态与防重复扣费保障；覆盖 7 类真实场景测试全绿（Rust 增至 136 项全绿）。 |
 | **T04** | M1 | P0 | Agent/MCP 权限与本地资源边界 | **TODO** | `src-tauri/src/services/agent.rs`<br>`tool_permissions.rs`<br>`mcp.rs` | 加强单次调用敏感确认、规范路径边界与网络请求防护。 |
 | **T05** | M1 | P0 | 收紧 Tauri 资源边界、补齐最小发布前检验 | **TODO** | `src-tauri/tauri.conf.json`<br>`capabilities/default.json` | 收紧 `assetProtocol.scope`，验证 CSP 与打包冒烟测试。 |
 | **T06** | M2 | P1 | GitHub Actions 与自动质量门禁 | **TODO** | `.github/workflows/ci.yml` | 增加 Windows runner 自动化测试与质量流水线。 |

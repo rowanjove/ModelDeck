@@ -266,7 +266,10 @@ impl JobQueue {
             return;
         }
         let now = now_iso();
-        let is_terminal = matches!(status, "completed" | "failed" | "cancelled" | "interrupted");
+        let is_terminal = matches!(
+            status,
+            "completed" | "failed" | "cancelled" | "interrupted" | "unknown_submission"
+        );
         let mut status_owned = status.to_string();
         let mut event_type_owned = event_type.to_string();
         let mut stage_owned = stage.map(str::to_string);
@@ -282,7 +285,7 @@ impl JobQueue {
                 "UPDATE generation_tasks
                  SET status = ?, error = COALESCE(?, error), completed_at = COALESCE(?, completed_at),
                      queue_output_json = COALESCE(?, queue_output_json)
-                 WHERE id = ? AND (status NOT IN ('completed', 'failed', 'cancelled', 'interrupted') OR status = ?)",
+                 WHERE id = ? AND (status NOT IN ('completed', 'failed', 'cancelled', 'interrupted', 'unknown_submission') OR status = ?)",
             )
             .bind(status)
             .bind(error)
@@ -333,7 +336,7 @@ impl JobQueue {
                 status_owned = row.try_get("status").unwrap_or_default();
                 if !matches!(
                     status_owned.as_str(),
-                    "completed" | "failed" | "cancelled" | "interrupted"
+                    "completed" | "failed" | "cancelled" | "interrupted" | "unknown_submission"
                 ) {
                     return;
                 }
@@ -349,6 +352,7 @@ impl JobQueue {
                     message_owned = Some(match status_owned.as_str() {
                         "cancelled" => "任务已取消".to_string(),
                         "interrupted" => "任务已中断".to_string(),
+                        "unknown_submission" => "提交未决（防重复扣费）".to_string(),
                         _ => "任务状态已由其他操作完成".to_string(),
                     });
                 }
@@ -360,7 +364,7 @@ impl JobQueue {
             if let Some(entry) = tasks.get_mut(task_id) {
                 let current_is_terminal = matches!(
                     entry.status.as_str(),
-                    "completed" | "failed" | "cancelled" | "interrupted"
+                    "completed" | "failed" | "cancelled" | "interrupted" | "unknown_submission"
                 );
                 // 任何终态一旦落定都不可再被另一个终态覆盖。
                 if current_is_terminal && entry.status != status_owned {
@@ -409,7 +413,11 @@ impl JobQueue {
                     .filter(|(_, t)| {
                         matches!(
                             t.status.as_str(),
-                            "completed" | "failed" | "cancelled" | "interrupted"
+                            "completed"
+                                | "failed"
+                                | "cancelled"
+                                | "interrupted"
+                                | "unknown_submission"
                         )
                     })
                     .map(|(k, _)| k.clone())
@@ -430,8 +438,26 @@ impl JobQueue {
             tokio::spawn(async move {
                 let result = if status_owned == "running" {
                     sqlx::query(
-                        "UPDATE generation_tasks SET status = ?
-                         WHERE id = ? AND status IN ('queued', 'running')",
+                        "UPDATE generation_tasks SET status = ?, execution_phase = 'running'
+                         WHERE id = ? AND status IN ('queued', 'submitting', 'running')",
+                    )
+                    .bind(&status_owned)
+                    .bind(&task_id_owned)
+                    .execute(&db)
+                    .await
+                } else if status_owned == "submitting" {
+                    sqlx::query(
+                        "UPDATE generation_tasks SET status = ?, execution_phase = 'submitting', billing_risk = 'possible'
+                         WHERE id = ? AND status IN ('queued', 'claimed')",
+                    )
+                    .bind(&status_owned)
+                    .bind(&task_id_owned)
+                    .execute(&db)
+                    .await
+                } else if status_owned == "downloading" {
+                    sqlx::query(
+                        "UPDATE generation_tasks SET status = ?, execution_phase = 'downloading'
+                         WHERE id = ? AND status IN ('running', 'downloading')",
                     )
                     .bind(&status_owned)
                     .bind(&task_id_owned)
@@ -488,7 +514,7 @@ impl JobQueue {
             .filter(|t| {
                 !matches!(
                     t.status.as_str(),
-                    "completed" | "failed" | "cancelled" | "interrupted"
+                    "completed" | "failed" | "cancelled" | "interrupted" | "unknown_submission"
                 )
             })
             .cloned()
@@ -660,7 +686,7 @@ impl JobQueue {
         {
             if !matches!(
                 task.status.as_str(),
-                "completed" | "failed" | "cancelled" | "interrupted"
+                "completed" | "failed" | "cancelled" | "interrupted" | "unknown_submission"
             ) {
                 task.status = "running".to_string();
                 task.progress = Some(progress);

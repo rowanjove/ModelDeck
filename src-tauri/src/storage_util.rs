@@ -112,6 +112,37 @@ pub fn check_disk_space(target: &Path, additional_bytes: u64) -> Result<(), AppE
     Ok(())
 }
 
+/// 检查并保证目标存储目录存在且具备完全写入权限，同时验证剩余磁盘空间
+pub fn ensure_dir_writable(dir: &Path) -> Result<(), AppError> {
+    if !dir.exists() {
+        std::fs::create_dir_all(dir).map_err(|e| {
+            AppError::storage(format!("无法创建数据存储目录 [{}]: {e}", dir.display()))
+        })?;
+    }
+
+    let probe_file = dir.join(format!(".perm_probe_{}", Uuid::new_v4()));
+    let probe_res = (|| -> std::io::Result<()> {
+        let mut file = File::create(&probe_file)?;
+        file.write_all(b"probe")?;
+        file.flush()?;
+        drop(file);
+        std::fs::remove_file(&probe_file)?;
+        Ok(())
+    })();
+
+    if let Err(e) = probe_res {
+        let _ = std::fs::remove_file(&probe_file);
+        return Err(AppError::storage(format!(
+            "数据存储目录没有写入权限，请检查目录权限或以具有读写权限的用户运行: [{}] ({e})",
+            dir.display()
+        )));
+    }
+
+    check_disk_space(dir, 0)?;
+
+    Ok(())
+}
+
 /// 同步原子写入：先写入临时文件，flush + sync_all 后原子重命名替换目标文件
 pub fn atomic_write(target: &Path, content: &[u8]) -> Result<(), AppError> {
     let parent = target
@@ -262,5 +293,12 @@ mod tests {
 
         // 清理
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_ensure_dir_writable() {
+        let temp_dir = std::env::temp_dir().join(format!("md-writable-test-{}", Uuid::new_v4()));
+        assert!(ensure_dir_writable(&temp_dir).is_ok());
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

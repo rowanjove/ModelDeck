@@ -1455,12 +1455,14 @@ mod tests {
         assert!(!cat.providers.is_empty());
         assert!(!cat.models.is_empty());
 
-        // 尝试导出同步到仓库 registry/model-registry.json
+        // 仅在文件不存在时导出同步到仓库 registry/model-registry.json，避免测试反复产生写入副作用
         let repo_registry_file = Path::new("../registry/model-registry.json");
-        if let Some(parent) = repo_registry_file.parent() {
-            if parent.exists() {
-                if let Ok(bytes) = serde_json::to_vec_pretty(&cat) {
-                    let _ = std::fs::write(repo_registry_file, bytes);
+        if !repo_registry_file.exists() {
+            if let Some(parent) = repo_registry_file.parent() {
+                if parent.exists() {
+                    if let Ok(bytes) = serde_json::to_vec_pretty(&cat) {
+                        let _ = std::fs::write(repo_registry_file, bytes);
+                    }
                 }
             }
         }

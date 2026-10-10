@@ -268,7 +268,9 @@
         {
           "type": "requires",
           "field": "enable_upscale",
-          "required_fields": ["upscale_factor"]
+          "required_fields": [
+            "upscale_factor"
+          ]
         },
         {
           "type": "conditionalVisibility",
@@ -343,9 +345,18 @@
             "inputs": {
               "cfg": 3.5,
               "denoise": 1.0,
-              "latent_image": ["27", 0],
-              "model": ["12", 0],
-              "positive": ["6", 0],
+              "latent_image": [
+                "27",
+                0
+              ],
+              "model": [
+                "12",
+                0
+              ],
+              "positive": [
+                "6",
+                0
+              ],
               "sampler_name": "euler",
               "scheduler": "simple",
               "seed": 42,
@@ -369,15 +380,24 @@
           "8": {
             "class_type": "VAEDecode",
             "inputs": {
-              "samples": ["13", 0],
-              "vae": ["10", 0]
+              "samples": [
+                "13",
+                0
+              ],
+              "vae": [
+                "10",
+                0
+              ]
             }
           },
           "9": {
             "class_type": "SaveImage",
             "inputs": {
               "filename_prefix": "FluxDev",
-              "images": ["8", 0]
+              "images": [
+                "8",
+                0
+              ]
             }
           }
         },
@@ -457,10 +477,22 @@
             "inputs": {
               "cfg": 7.0,
               "denoise": 1.0,
-              "latent_image": ["5", 0],
-              "model": ["4", 0],
-              "negative": ["7", 0],
-              "positive": ["6", 0],
+              "latent_image": [
+                "5",
+                0
+              ],
+              "model": [
+                "4",
+                0
+              ],
+              "negative": [
+                "7",
+                0
+              ],
+              "positive": [
+                "6",
+                0
+              ],
               "sampler_name": "euler",
               "scheduler": "normal",
               "seed": 42,
@@ -484,29 +516,44 @@
           "6": {
             "class_type": "CLIPTextEncode",
             "inputs": {
-              "clip": ["4", 1],
+              "clip": [
+                "4",
+                1
+              ],
               "text": "masterpiece"
             }
           },
           "7": {
             "class_type": "CLIPTextEncode",
             "inputs": {
-              "clip": ["4", 1],
+              "clip": [
+                "4",
+                1
+              ],
               "text": "ugly, blurry"
             }
           },
           "8": {
             "class_type": "VAEDecode",
             "inputs": {
-              "samples": ["3", 0],
-              "vae": ["4", 2]
+              "samples": [
+                "3",
+                0
+              ],
+              "vae": [
+                "4",
+                2
+              ]
             }
           },
           "9": {
             "class_type": "SaveImage",
             "inputs": {
               "filename_prefix": "SDXL",
-              "images": ["8", 0]
+              "images": [
+                "8",
+                0
+              ]
             }
           }
         },
@@ -594,7 +641,10 @@
             "inputs": {
               "filename_prefix": "WanI2V",
               "fps": 16,
-              "images": ["3", 0]
+              "images": [
+                "3",
+                0
+              ]
             }
           },
           "3": {
@@ -602,10 +652,22 @@
             "inputs": {
               "cfg": 6.0,
               "denoise": 1.0,
-              "latent_image": ["10", 0],
-              "model": ["4", 0],
-              "negative": ["7", 0],
-              "positive": ["6", 0],
+              "latent_image": [
+                "10",
+                0
+              ],
+              "model": [
+                "4",
+                0
+              ],
+              "negative": [
+                "7",
+                0
+              ],
+              "positive": [
+                "6",
+                0
+              ],
               "sampler_name": "euler",
               "scheduler": "normal",
               "seed": 42,
@@ -621,14 +683,20 @@
           "6": {
             "class_type": "CLIPTextEncode",
             "inputs": {
-              "clip": ["4", 1],
+              "clip": [
+                "4",
+                1
+              ],
               "text": "cinematic scene"
             }
           },
           "7": {
             "class_type": "CLIPTextEncode",
             "inputs": {
-              "clip": ["4", 1],
+              "clip": [
+                "4",
+                1
+              ],
               "text": "static, watermark"
             }
           }
@@ -688,7 +756,10 @@
             "inputs": {
               "filename_prefix": "HunyuanVideo",
               "fps": 24,
-              "images": ["3", 0]
+              "images": [
+                "3",
+                0
+              ]
             }
           },
           "3": {
@@ -696,8 +767,14 @@
             "inputs": {
               "cfg": 6.0,
               "denoise": 1.0,
-              "model": ["4", 0],
-              "positive": ["6", 0],
+              "model": [
+                "4",
+                0
+              ],
+              "positive": [
+                "6",
+                0
+              ],
               "sampler_name": "euler",
               "scheduler": "normal",
               "seed": 42,
@@ -713,7 +790,10 @@
           "6": {
             "class_type": "CLIPTextEncode",
             "inputs": {
-              "clip": ["4", 1],
+              "clip": [
+                "4",
+                1
+              ],
               "text": "high quality video"
             }
           }

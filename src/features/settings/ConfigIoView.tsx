@@ -96,8 +96,10 @@ export function ConfigIoView() {
           配置导出与导入 (Config Import / Export)
         </h2>
         <p className="muted" style={{ margin: 0, fontSize: "13px" }}>
-          备份或迁移您的自定义 Provider、模型架构及参数预设。所有敏感凭据（如
-          API Key）在导出时均会自动剔除脱敏。
+          备份或跨机器迁移您的自定义
+          Provider、模型架构及参数预设。使用免安装绿色版或更换设备时，可通过此功能无缝迁移；为保护隐私，所有敏感凭据（如
+          API
+          Key）由系统凭据库加密保护，在导出时会自动脱敏剔除，导入后需在新设备重新输入。
         </p>
       </div>
 

@@ -26,6 +26,7 @@ pub struct AppState {
 
 impl AppState {
     pub async fn initialize(dir: &Path) -> Result<Self, AppError> {
+        crate::storage_util::ensure_dir_writable(dir)?;
         tokio::fs::create_dir_all(dir)
             .await
             .map_err(|err| AppError::storage(format!("无法创建数据目录: {err}")))?;

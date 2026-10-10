@@ -150,6 +150,44 @@ export function PipelineView({
     setRunError(null);
   };
 
+  const [importFeedback, setImportFeedback] = useState<string | null>(null);
+
+  const handleExport = async () => {
+    try {
+      const json = await api.pipelinesExport(currentPipeline);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${
+        currentPipeline.name.replace(/\s+/g, "_") || "pipeline"
+      }.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      setRunError(`导出失败: ${String(e)}`);
+    }
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const text = evt.target?.result as string;
+        const imported = await api.pipelinesImport(text);
+        setCurrentPipeline(imported);
+        setImportFeedback(`成功导入工作流:「${imported.name}」`);
+        setTimeout(() => setImportFeedback(null), 3000);
+      } catch (err: unknown) {
+        setRunError(`导入工作流失败: ${String(err)}`);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   const handleSave = async () => {
     try {
       setRunError(null);
@@ -235,6 +273,29 @@ export function PipelineView({
           pipelineId: currentPipeline.id || undefined,
           steps: currentPipeline.steps,
           initialInput,
+        },
+        taskId,
+      );
+    } catch (e: unknown) {
+      setRunError(String(e));
+      setIsRunning(false);
+      setActiveTaskId(null);
+    }
+  };
+
+  const handleResume = async (resumeIndex: number) => {
+    setIsRunning(true);
+    setRunError(null);
+    const taskId = crypto.randomUUID();
+    setActiveTaskId(taskId);
+    try {
+      await api.tasksSubmitPipeline(
+        {
+          pipelineId: currentPipeline.id || undefined,
+          steps: currentPipeline.steps,
+          initialInput,
+          resumeFromStepIndex: resumeIndex,
+          cachedStepResults: intermediateSteps,
         },
         taskId,
       );
@@ -347,6 +408,33 @@ export function PipelineView({
         </div>
 
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <input
+            type="file"
+            id="pipeline-import-file-input"
+            accept=".json"
+            style={{ display: "none" }}
+            onChange={handleImportFile}
+          />
+          <button
+            type="button"
+            className="btn"
+            style={{ padding: "6px 12px", fontSize: "13px" }}
+            onClick={() => {
+              document.getElementById("pipeline-import-file-input")?.click();
+            }}
+            title="从本地 JSON 文件导入并校验工作流定义"
+          >
+            📥 导入 JSON
+          </button>
+          <button
+            type="button"
+            className="btn"
+            style={{ padding: "6px 12px", fontSize: "13px" }}
+            onClick={handleExport}
+            title="导出当前工作流定义为 JSON 文件"
+          >
+            📤 导出 JSON
+          </button>
           <button
             type="button"
             className="btn"
@@ -388,6 +476,21 @@ export function PipelineView({
           </button>
         </div>
       </header>
+
+      {importFeedback && (
+        <div
+          style={{
+            padding: "8px 24px",
+            background: "var(--ok-subtle, rgba(16, 185, 129, 0.15))",
+            color: "var(--ok, #10b981)",
+            fontSize: "13px",
+            fontWeight: 600,
+            borderBottom: "1px solid var(--line)",
+          }}
+        >
+          ✓ {importFeedback}
+        </div>
+      )}
 
       {/* Main Body */}
       <div
@@ -834,6 +937,48 @@ export function PipelineView({
                         gap: "6px",
                       }}
                     >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                        }}
+                      >
+                        <label
+                          style={{
+                            fontSize: "12px",
+                            color: "var(--muted)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          输入数据类型:
+                        </label>
+                        <select
+                          value={step.dataType || "text"}
+                          onChange={(e) =>
+                            updateStep(idx, {
+                              ...step,
+                              dataType: e.target.value as
+                                | "text"
+                                | "image"
+                                | "video"
+                                | "audio",
+                            })
+                          }
+                          style={{
+                            fontSize: "12px",
+                            padding: "3px 8px",
+                            borderRadius: "6px",
+                            border: "1px solid var(--line)",
+                            background: "var(--bg)",
+                          }}
+                        >
+                          <option value="text">纯文本 (Text)</option>
+                          <option value="image">图像文件路径 (Image)</option>
+                          <option value="video">视频文件路径 (Video)</option>
+                          <option value="audio">音频文件路径 (Audio)</option>
+                        </select>
+                      </div>
                       <label
                         style={{ fontSize: "12px", color: "var(--muted)" }}
                       >
@@ -991,6 +1136,72 @@ export function PipelineView({
                           }}
                         />
                       </div>
+
+                      {(() => {
+                        const matchedModel = modelsQuery.data?.find(
+                          (m) => m.id === step.modelDefinitionId,
+                        );
+                        const isVisual =
+                          matchedModel?.modality === "image" ||
+                          matchedModel?.modality === "video";
+                        if (!isVisual) return null;
+                        return (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "4px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                            >
+                              <label
+                                style={{
+                                  fontSize: "12px",
+                                  color: "var(--muted)",
+                                }}
+                              >
+                                {matchedModel.modality === "video"
+                                  ? "视频首帧媒体引用变量 (可选):"
+                                  : "图生图原图媒体引用变量 (可选):"}
+                              </label>
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  color: "var(--muted)",
+                                }}
+                              >
+                                留空默认从上一节点获取
+                              </span>
+                            </div>
+                            <input
+                              type="text"
+                              value={step.mediaInputVariable || ""}
+                              onChange={(e) =>
+                                updateStep(idx, {
+                                  ...step,
+                                  mediaInputVariable:
+                                    e.target.value.trim() || undefined,
+                                })
+                              }
+                              placeholder="例如：{{step_keyframe.media}} 或 {{prev}}"
+                              style={{
+                                fontSize: "12px",
+                                padding: "4px 8px",
+                                borderRadius: "6px",
+                                border: "1px solid var(--line)",
+                                background: "var(--bg)",
+                                fontFamily: "monospace",
+                              }}
+                            />
+                          </div>
+                        );
+                      })()}
 
                       <div
                         style={{
@@ -1252,15 +1463,55 @@ export function PipelineView({
               {runError && (
                 <div
                   style={{
-                    padding: "8px 12px",
+                    padding: "10px 14px",
                     borderRadius: "6px",
                     background: "rgba(239, 68, 68, 0.1)",
                     border: "1px solid rgba(239, 68, 68, 0.3)",
                     color: "var(--danger, #ef4444)",
                     fontSize: "12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
                   }}
                 >
-                  执行失败: {runError}
+                  <div style={{ fontWeight: 600 }}>
+                    执行中断/失败: {runError}
+                  </div>
+                  {intermediateSteps.length > 0 &&
+                    intermediateSteps.every(
+                      (s) => s.status === "completed",
+                    ) && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          borderTop: "1px dashed rgba(239, 68, 68, 0.3)",
+                          paddingTop: "6px",
+                        }}
+                      >
+                        <span style={{ fontSize: "11px", color: "var(--ink)" }}>
+                          前 {intermediateSteps.length} 个步骤已成功完成并缓存
+                          (不重复计费)。
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleResume(intermediateSteps.length)}
+                          style={{
+                            padding: "4px 10px",
+                            borderRadius: "4px",
+                            border: "1px solid var(--accent)",
+                            background: "var(--accent)",
+                            color: "var(--accent-ink)",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                          }}
+                        >
+                          🔄 从第 {intermediateSteps.length + 1} 步断点续跑
+                        </button>
+                      </div>
+                    )}
                 </div>
               )}
             </div>

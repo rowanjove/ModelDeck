@@ -1113,6 +1113,27 @@ pub async fn pipelines_presets() -> Result<Vec<services::pipeline::PipelineDefin
 }
 
 #[tauri::command]
+pub async fn pipelines_validate(
+    definition: services::pipeline::PipelineDefinition,
+) -> Result<(), AppError> {
+    services::pipeline::validate_pipeline_definition(&definition)
+}
+
+#[tauri::command]
+pub async fn pipelines_export(
+    definition: services::pipeline::PipelineDefinition,
+) -> Result<String, AppError> {
+    services::pipeline::export_pipeline_json(&definition)
+}
+
+#[tauri::command]
+pub async fn pipelines_import(
+    json_str: String,
+) -> Result<services::pipeline::PipelineDefinition, AppError> {
+    services::pipeline::import_pipeline_json(&json_str)
+}
+
+#[tauri::command]
 pub async fn pipelines_run(
     state: State<'_, AppState>,
     input: services::pipeline::PipelineExecutionInput,

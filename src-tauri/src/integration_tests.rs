@@ -4537,6 +4537,7 @@ async fn phase9_automation_workflow_pipeline_test() {
                     id: "step_input".to_string(),
                     label: "输入文本".to_string(),
                     default_value: "默认输入".to_string(),
+                    data_type: "text".to_string(),
                 },
                 services::pipeline::PipelineStep::Transform {
                     id: "step_transform".to_string(),
@@ -4607,6 +4608,7 @@ async fn phase9_automation_workflow_pipeline_test() {
             id: "step_1".to_string(),
             label: "用户输入".to_string(),
             default_value: "".to_string(),
+            data_type: "text".to_string(),
         },
         services::pipeline::PipelineStep::Transform {
             id: "step_2".to_string(),
@@ -4621,6 +4623,8 @@ async fn phase9_automation_workflow_pipeline_test() {
             prompt_template: "{{prev}}".to_string(),
             system_prompt: None,
             parameters: serde_json::Map::new(),
+            expected_input_kind: Some("text".to_string()),
+            media_input_variable: None,
         },
     ];
 
@@ -4635,6 +4639,8 @@ async fn phase9_automation_workflow_pipeline_test() {
             pipeline_id: Some(created.id.clone()),
             steps: exec_steps,
             initial_input: "这是初始输入内容".to_string(),
+            resume_from_step_index: None,
+            cached_step_results: None,
         },
     )
     .await

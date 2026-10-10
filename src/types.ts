@@ -964,6 +964,7 @@ export type PipelineStep =
       id: string;
       label: string;
       defaultValue?: string;
+      dataType?: "text" | "image" | "video" | "audio" | string;
     }
   | {
       type: "model";
@@ -973,6 +974,8 @@ export type PipelineStep =
       promptTemplate: string;
       systemPrompt?: string | null;
       parameters?: Record<string, unknown>;
+      expectedInputKind?: "text" | "image" | "video" | "audio" | string;
+      mediaInputVariable?: string | null;
     }
   | {
       type: "transform";
@@ -996,6 +999,8 @@ export interface PipelineExecutionInput {
   pipelineId?: string | null;
   steps: PipelineStep[];
   initialInput: string;
+  resumeFromStepIndex?: number | null;
+  cachedStepResults?: PipelineStepResult[] | null;
 }
 
 export interface PipelineStepResult {

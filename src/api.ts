@@ -305,6 +305,12 @@ export const api = {
     invoke<PipelineDefinition>("pipelines_save", { definition }),
   pipelinesDelete: (id: string) => invoke<void>("pipelines_delete", { id }),
   pipelinesPresets: () => invoke<PipelineDefinition[]>("pipelines_presets"),
+  pipelinesValidate: (definition: PipelineDefinition) =>
+    invoke<void>("pipelines_validate", { definition }),
+  pipelinesExport: (definition: PipelineDefinition) =>
+    invoke<string>("pipelines_export", { definition }),
+  pipelinesImport: (jsonStr: string) =>
+    invoke<PipelineDefinition>("pipelines_import", { jsonStr }),
   pipelinesRun: (input: PipelineExecutionInput, taskId?: string) =>
     invoke<PipelineExecutionResult>("pipelines_run", { input, taskId }),
 

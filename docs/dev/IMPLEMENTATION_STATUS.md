@@ -36,7 +36,7 @@
 | **D04** | Agent `run_command` 缺少 OS 沙箱 | **已加固缓解** | `src-tauri/src/services/agent.rs`<br>`src-tauri/src/services/mcp.rs`<br>`src-tauri/src/services/chat.rs` | 针对高危工具（`run_command`、`delete_file`、`write_file`）严禁 `"*"` 通配符放行，强制精准逐次人工确认；MCP 工具建立 `server.id:tool.name` 稳定身份；文件与命令执行引入受控工作区约束（`workspace_root`），通过物理规范化路径严密阻断目录穿越、跨区符号链接与应用数据/系统凭据目录访问；`http_request` 强化 SSRF 防护，拦截云元数据（169.254.x.x 等）、私网网段与内网域名，禁用跨域 302 重定向；记录脱敏结构化审计日志；规范文案消除“绝对安全沙箱”虚假断言。 |
 | **D05** | 工作流引擎仅线性循环，非 DAG | **静态确认** | `src-tauri/src/services/pipeline.rs` | `pipeline.rs` 374 行使用 `for (index, step) in input.steps.iter().enumerate()` 顺序遍历执行，无拓扑排序、条件分支或并行调度。 |
 | **D06** | Tauri asset 协议范围过度放宽 (`["**"]`) | **已修复** | `src-tauri/tauri.conf.json`<br>`src-tauri/src/commands.rs`<br>`docs/dev/RELEASE_SMOKE_TEST.md` | 收紧 `assetProtocol.scope`，排除系统与敏感根目录，仅允许应用数据目录与用户合法个人媒体目录；IPC 文件读取/保存命令全量增加路径越界与应用数据目录覆盖防护；发布冒烟验证通过。 |
-| **D07** | 代码库缺失 GitHub Actions CI 流水线 | **静态确认** | 根目录构建配置 | 根目录完全无 `.github/workflows/` 目录，无远端自动集成门禁。 |
+| **D07** | 代码库缺失 GitHub Actions CI 流水线 | **已修复** | `.github/workflows/ci.yml` | 补齐 GitHub Actions 自动化质量门禁与 Windows 发布流水线；包含依赖锁定安装、TypeScript 类型检查、Biome Lint、Vitest 测试、前端构建、Cargo 格式化、Clippy 严格检查 (-D warnings) 与全套测试套件运行。 |
 | **D08** | 遗留 `ai-workbench` / `local.aiworkbench` 标识 | **静态确认** | `src-tauri/Cargo.toml`<br>`src-tauri/src/credentials.rs` | `Cargo.toml` 中 `name = "ai-workbench"`，`credentials.rs` 中凭据服务名为 `local.aiworkbench`；直接改名可能破坏用户已保存的系统凭据。 |
 
 ---
@@ -51,7 +51,7 @@
 | **T03** | M1 | P0 | 任务崩溃恢复语义与可恢复机制 | **DONE** | `src-tauri/src/services/task_scheduler.rs`<br>`job_queue.rs`<br>`history.rs`<br>`migrations/021_task_recovery_fields.sql`<br>前端状态组件与映射表 | 实现增量迁移 021 记录关键状态字段；细化恢复逻辑为 5 类策略（本地重排队、提交未决、保留远端 ID 续查、下载中断核验、不可续查提示）；引入 `unknown_submission` 状态与防重复扣费保障；覆盖 7 类真实场景测试全绿（Rust 增至 136 项全绿）。 |
 | **T04** | M1 | P0 | Agent/MCP 权限与本地资源边界 | **DONE** | `src-tauri/src/services/agent.rs`<br>`src-tauri/src/services/mcp.rs`<br>`src-tauri/src/services/chat.rs` | 实现高危工具通配符 `"*"` 阻断与精准人工确认门禁；受控工作区边界限定与目录穿越/符号链接逃逸阻断；`http_request` 全方位 SSRF 过滤（云元数据、私网、内网域名、禁用跨域重定向）；MCP 稳定身份 `server.id:tool.name`；敏感凭据脱敏审计日志；单元与集成测试 140 项全绿。 |
 | **T05** | M1 | P0 | 收紧 Tauri 资源边界、补齐最小发布前检验 | **DONE** | `src-tauri/tauri.conf.json`<br>`src-tauri/src/commands.rs`<br>`docs/dev/RELEASE_SMOKE_TEST.md` | 收紧 `assetProtocol.scope` 白名单作用域；核验 CSP 策略；为普通 IPC 文件读取与保存命令补充严格目录边界保护；形成最小发布前冒烟检验记录；测试增至 141 项全绿。 |
-| **T06** | M2 | P1 | GitHub Actions 与自动质量门禁 | **TODO** | `.github/workflows/ci.yml` | 增加 Windows runner 自动化测试与质量流水线。 |
+| **T06** | M2 | P1 | GitHub Actions 与自动质量门禁 | **DONE** | `.github/workflows/ci.yml` | 建立 Windows 自动化质量门禁与发布演练工作流，包含类型检查、双端测试、Clippy 严格门禁、构建验证与 SHA256 校验和生成。 |
 | **T07** | M2 | P1 | Provider 契约测试及兼容矩阵 | **TODO** | `src-tauri/src/adapters/`<br>`docs/dev/PROVIDER_COMPATIBILITY.md` | 建立 Mock 契约覆盖矩阵，明确真实 API 兼容能力。 |
 | **T08** | M2 | P1 | 任务超时、取消、下载与重试一致性 | **TODO** | `job_queue.rs`<br>`image.rs`<br>`video.rs`<br>`audio.rs` | 统一任务生命周期、超时分类与原子文件下载。 |
 | **T09** | M2 | P1 | 数据持久化、凭据及备份恢复 | **TODO** | `src-tauri/src/db.rs`<br>`credentials.rs`<br>`services/config_io.rs` | SQLite WAL 校验、系统凭据兼容平滑迁移。 |

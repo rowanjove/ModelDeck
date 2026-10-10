@@ -1187,7 +1187,7 @@ pub fn validate_catalog(catalog: &RegistryCatalog) -> Result<(), AppError> {
 
 pub fn is_newer_version(remote: &str, current: &str) -> bool {
     let parse_parts = |v: &str| -> Vec<u64> {
-        v.split(|c: char| c == '.' || c == '-' || c == '_')
+        v.split(['.', '-', '_'])
             .filter_map(|s| s.parse::<u64>().ok())
             .collect()
     };

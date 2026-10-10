@@ -1,0 +1,128 @@
+name: ModelDeck CI & Quality Gate
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - "fix/**"
+      - "feat/**"
+      - "release/**"
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: Windows Quality Gate (Full Test & Lint)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Setup Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Frontend TypeScript Typecheck
+        run: npm run typecheck
+
+      - name: Frontend Biome Lint Check
+        run: npm run lint
+
+      - name: Frontend Vitest Unit Tests
+        run: npm run test
+
+      - name: Frontend Production Bundle Build
+        run: npm run build
+
+      - name: Rust Code Formatting Check
+        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+
+      - name: Rust Clippy Strict Quality Gate (-D warnings)
+        run: cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+      - name: Rust Unit and Integration Tests (Full Suite)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  release-dry-run:
+    name: Build & Package Dry-Run
+    needs: quality-gate
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Setup Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Build Frontend Distribution
+        run: npm run build
+
+      - name: Build Tauri Desktop Bundle
+        run: npx @tauri-apps/cli build --no-bundle
+        env:
+          CI: true
+
+      - name: Generate Checksums & Artifacts
+        shell: pwsh
+        run: |
+          mkdir -p dist-release
+          if (Test-Path "src-tauri/target/release/ModelDeck.exe") {
+            Copy-Item "src-tauri/target/release/ModelDeck.exe" -Destination "dist-release/"
+            $hash = (Get-FileHash -Algorithm SHA256 "dist-release/ModelDeck.exe").Hash
+            "$hash  ModelDeck.exe" | Out-File -Encoding utf8 "dist-release/checksums.sha256"
+            Write-Host "Generated SHA256: $hash"
+          } else {
+            Write-Warning "ModelDeck.exe not found in release target directory."
+          }
+
+      - name: Upload Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModelDeck-Windows-Binary
+          path: dist-release/
+          if-no-files-found: warn

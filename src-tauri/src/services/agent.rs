@@ -252,7 +252,7 @@ async fn run_call(turn: &AgentTurn<'_>, tools: &[ToolSpec], call: &ToolCall) -> 
                             } else {
                                 t == &call.name
                                     || t == "*"
-                                    || mcp_stable_id.map_or(false, |id| t == id)
+                                    || mcp_stable_id.is_some_and(|id| t == id)
                             }
                         });
                         if !is_confirmed {

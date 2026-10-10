@@ -10,8 +10,12 @@ export function AnalyticsView() {
   const [range, setRange] = useState<TimeRange>("7d");
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [editingModelId, setEditingModelId] = useState("");
+  const [editingProviderId, setEditingProviderId] = useState("");
+  const [editingPricingUnit, setEditingPricingUnit] =
+    useState<string>("per_1m_tokens");
   const [inputPrice, setInputPrice] = useState("1.00");
   const [outputPrice, setOutputPrice] = useState("2.00");
+  const [unitPrice, setUnitPrice] = useState("0.02");
 
   const summaryQuery = useQuery({
     queryKey: ["analytics_summary", range],
@@ -24,15 +28,24 @@ export function AnalyticsView() {
   });
 
   const savePricingMutation = useMutation({
-    mutationFn: ({
-      modelId,
-      inputPerM,
-      outputPerM,
-    }: {
+    mutationFn: (params: {
       modelId: string;
-      inputPerM: number;
-      outputPerM: number;
-    }) => api.analyticsSetPricing(modelId, inputPerM, outputPerM),
+      providerId?: string;
+      inputPerM?: number;
+      outputPerM?: number;
+      pricingUnit?: string;
+      pricePerUnit?: number;
+    }) =>
+      api.analyticsSetPricingDetailed({
+        modelId: params.modelId,
+        providerId: params.providerId || "",
+        inputPerM: params.inputPerM ?? 0,
+        outputPerM: params.outputPerM ?? 0,
+        pricingUnit: params.pricingUnit || "per_1m_tokens",
+        pricePerUnit: params.pricePerUnit ?? 0,
+        source: "custom_user",
+        currency: "USD",
+      }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["analytics_pricing"] });
       await queryClient.invalidateQueries({ queryKey: ["analytics_summary"] });
@@ -44,10 +57,18 @@ export function AnalyticsView() {
     modelId: string,
     currentIn?: number,
     currentOut?: number,
+    currentUnit?: string,
+    currentUnitPrice?: number,
+    currentProviderId?: string,
   ) => {
     setEditingModelId(modelId);
+    setEditingProviderId(currentProviderId || "");
+    setEditingPricingUnit(currentUnit || "per_1m_tokens");
     setInputPrice(currentIn !== undefined ? currentIn.toString() : "1.00");
     setOutputPrice(currentOut !== undefined ? currentOut.toString() : "2.00");
+    setUnitPrice(
+      currentUnitPrice !== undefined ? currentUnitPrice.toString() : "0.02",
+    );
     setShowPricingModal(true);
   };
 
@@ -168,7 +189,7 @@ export function AnalyticsView() {
                 marginBottom: "6px",
               }}
             >
-              💰 估算总花费 (USD)
+              💰 综合调用总花费 (USD)
             </div>
             <div
               style={{
@@ -186,7 +207,85 @@ export function AnalyticsView() {
                 marginTop: "4px",
               }}
             >
-              基于输入/输出 Token 真实阶梯定价
+              含官方账单与本地多模态单位预估
+            </div>
+          </div>
+
+          {/* Official vs Estimated Metering Breakdown */}
+          <div
+            style={{
+              padding: "16px",
+              background: "var(--bg-card)",
+              borderRadius: "8px",
+              border: "1px solid var(--line)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "12px",
+                color: "var(--muted)",
+                marginBottom: "6px",
+              }}
+            >
+              🏛️ 官方精准计量花费
+            </div>
+            <div
+              style={{
+                fontSize: "24px",
+                fontWeight: 700,
+                color: "#10b981",
+              }}
+            >
+              ${data ? (data.officialCostUsd ?? 0).toFixed(4) : "0.0000"}
+            </div>
+            <div
+              style={{
+                fontSize: "11px",
+                color: "var(--muted)",
+                marginTop: "4px",
+              }}
+            >
+              服务商响应计量: {data?.officialTaskCount ?? 0} 个任务
+            </div>
+          </div>
+
+          {/* Estimated Portion */}
+          <div
+            style={{
+              padding: "16px",
+              background: "var(--bg-card)",
+              borderRadius: "8px",
+              border: "1px solid var(--line)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "12px",
+                color: "var(--muted)",
+                marginBottom: "6px",
+              }}
+            >
+              📐 本地多模态估算花费
+            </div>
+            <div
+              style={{
+                fontSize: "24px",
+                fontWeight: 700,
+                color: "#f59e0b",
+              }}
+            >
+              $
+              {data ? (data.estimatedPortionCostUsd ?? 0).toFixed(4) : "0.0000"}
+            </div>
+            <div
+              style={{
+                fontSize: "11px",
+                color: "var(--muted)",
+                marginTop: "4px",
+              }}
+            >
+              预估: {data?.estimatedTaskCount ?? 0} 次 · 无计量:{" "}
+              {data?.unmeteredTaskCount ?? 0} 次
             </div>
           </div>
 
@@ -435,65 +534,122 @@ export function AnalyticsView() {
                       }}
                     >
                       <th style={{ padding: "8px 6px" }}>模型</th>
+                      <th style={{ padding: "8px 6px" }}>计量方式</th>
                       <th style={{ padding: "8px 6px" }}>调用数</th>
                       <th style={{ padding: "8px 6px" }}>Tokens</th>
                       <th style={{ padding: "8px 6px" }}>平均耗时</th>
-                      <th style={{ padding: "8px 6px" }}>估算费用</th>
+                      <th style={{ padding: "8px 6px" }}>综合费用</th>
                       <th style={{ padding: "8px 6px" }}>操作</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.topModels.map((m) => (
-                      <tr
-                        key={m.modelId}
-                        style={{ borderBottom: "1px solid var(--line)" }}
-                      >
-                        <td style={{ padding: "8px 6px" }}>
-                          <div style={{ fontWeight: 600 }}>{m.modelName}</div>
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "var(--muted)",
-                              fontFamily: "monospace",
-                            }}
-                          >
-                            {m.modelId}
-                          </div>
-                        </td>
-                        <td style={{ padding: "8px 6px" }}>{m.taskCount}</td>
-                        <td style={{ padding: "8px 6px" }}>
-                          {m.totalTokens.toLocaleString()}
-                        </td>
-                        <td style={{ padding: "8px 6px" }}>
-                          {m.avgLatencyMs > 0 ? `${m.avgLatencyMs}ms` : "-"}
-                        </td>
-                        <td
-                          style={{
-                            padding: "8px 6px",
-                            fontWeight: 600,
-                            color: "var(--accent)",
-                          }}
+                    {data.topModels.map((m) => {
+                      const meterBadge =
+                        m.meteringSource === "official"
+                          ? {
+                              text: "🏛️ 官方",
+                              color: "#10b981",
+                              bg: "#10b98118",
+                            }
+                          : m.meteringSource === "estimated"
+                            ? {
+                                text: "📐 估算",
+                                color: "#f59e0b",
+                                bg: "#f59e0b18",
+                              }
+                            : m.meteringSource === "unmetered"
+                              ? {
+                                  text: "⚠️ 无计量",
+                                  color: "#94a3b8",
+                                  bg: "#94a3b818",
+                                }
+                              : {
+                                  text: "🔀 混合",
+                                  color: "#8b5cf6",
+                                  bg: "#8b5cf618",
+                                };
+
+                      return (
+                        <tr
+                          key={m.modelId}
+                          style={{ borderBottom: "1px solid var(--line)" }}
                         >
-                          ${m.costUsd.toFixed(4)}
-                        </td>
-                        <td style={{ padding: "8px 6px" }}>
-                          <button
-                            type="button"
-                            onClick={() => openPricingEditor(m.modelId)}
+                          <td style={{ padding: "8px 6px" }}>
+                            <div style={{ fontWeight: 600 }}>{m.modelName}</div>
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "var(--muted)",
+                                fontFamily: "monospace",
+                              }}
+                            >
+                              {m.modelId}
+                            </div>
+                          </td>
+                          <td style={{ padding: "8px 6px" }}>
+                            <span
+                              style={{
+                                fontSize: "10.5px",
+                                padding: "2px 6px",
+                                borderRadius: "4px",
+                                color: meterBadge.color,
+                                background: meterBadge.bg,
+                                fontWeight: 600,
+                              }}
+                            >
+                              {meterBadge.text}
+                            </span>
+                          </td>
+                          <td style={{ padding: "8px 6px" }}>{m.taskCount}</td>
+                          <td style={{ padding: "8px 6px" }}>
+                            {m.totalTokens.toLocaleString()}
+                          </td>
+                          <td style={{ padding: "8px 6px" }}>
+                            {m.avgLatencyMs > 0 ? `${m.avgLatencyMs}ms` : "-"}
+                          </td>
+                          <td
                             style={{
-                              background: "none",
-                              border: "none",
+                              padding: "8px 6px",
+                              fontWeight: 600,
                               color: "var(--accent)",
-                              cursor: "pointer",
-                              fontSize: "11px",
-                              textDecoration: "underline",
                             }}
                           >
-                            配置定价
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                            <div>${m.costUsd.toFixed(4)}</div>
+                            {(m.officialCostUsd !== undefined &&
+                              m.officialCostUsd > 0) ||
+                            (m.estimatedCostUsd !== undefined &&
+                              m.estimatedCostUsd > 0) ? (
+                              <div
+                                style={{
+                                  fontSize: "10px",
+                                  color: "var(--muted)",
+                                  fontWeight: 400,
+                                }}
+                              >
+                                官方 ${m.officialCostUsd?.toFixed(4) ?? "0"} ·
+                                估算 ${m.estimatedCostUsd?.toFixed(4) ?? "0"}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td style={{ padding: "8px 6px" }}>
+                            <button
+                              type="button"
+                              onClick={() => openPricingEditor(m.modelId)}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: "var(--accent)",
+                                cursor: "pointer",
+                                fontSize: "11px",
+                                textDecoration: "underline",
+                              }}
+                            >
+                              配置定价
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -736,44 +892,23 @@ export function AnalyticsView() {
             </div>
 
             <div
-              style={{ display: "flex", flexDirection: "column", gap: "6px" }}
-            >
-              <label style={{ fontSize: "12px", color: "var(--muted)" }}>
-                模型标识符 (Model ID / Model API ID):
-              </label>
-              <input
-                type="text"
-                value={editingModelId}
-                onChange={(e) => setEditingModelId(e.target.value)}
-                placeholder="例如: gpt-4o, claude-3-5-sonnet, deepseek-chat"
-                style={{
-                  padding: "8px",
-                  fontSize: "13px",
-                  borderRadius: "6px",
-                  border: "1px solid var(--line)",
-                  background: "var(--bg)",
-                }}
-              />
-            </div>
-
-            <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 1fr",
+                gridTemplateColumns: "1.2fr 1fr",
                 gap: "10px",
               }}
             >
               <div
-                style={{ display: "flex", flexDirection: "column", gap: "4px" }}
+                style={{ display: "flex", flexDirection: "column", gap: "6px" }}
               >
                 <label style={{ fontSize: "12px", color: "var(--muted)" }}>
-                  输入价格 ($ / 1M Tokens):
+                  模型标识符 (Model ID):
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
-                  value={inputPrice}
-                  onChange={(e) => setInputPrice(e.target.value)}
+                  type="text"
+                  value={editingModelId}
+                  onChange={(e) => setEditingModelId(e.target.value)}
+                  placeholder="例如: gpt-4o, dall-e-3, cogvideox"
                   style={{
                     padding: "8px",
                     fontSize: "13px",
@@ -785,16 +920,112 @@ export function AnalyticsView() {
               </div>
 
               <div
+                style={{ display: "flex", flexDirection: "column", gap: "6px" }}
+              >
+                <label style={{ fontSize: "12px", color: "var(--muted)" }}>
+                  计费单位 (Pricing Unit):
+                </label>
+                <select
+                  value={editingPricingUnit}
+                  onChange={(e) => setEditingPricingUnit(e.target.value)}
+                  style={{
+                    padding: "8px",
+                    fontSize: "13px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--line)",
+                    background: "var(--bg)",
+                  }}
+                >
+                  <option value="per_1m_tokens">
+                    文本 Token ($/1M Tokens)
+                  </option>
+                  <option value="per_image">图像单张 ($/张)</option>
+                  <option value="per_video_second">视频时长 ($/秒)</option>
+                  <option value="per_audio_second">音频时长 ($/秒)</option>
+                  <option value="per_call">单次调用 ($/次)</option>
+                </select>
+              </div>
+            </div>
+
+            {editingPricingUnit === "per_1m_tokens" ? (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "10px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                  }}
+                >
+                  <label style={{ fontSize: "12px", color: "var(--muted)" }}>
+                    输入价格 ($ / 1M Tokens):
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={inputPrice}
+                    onChange={(e) => setInputPrice(e.target.value)}
+                    style={{
+                      padding: "8px",
+                      fontSize: "13px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--line)",
+                      background: "var(--bg)",
+                    }}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                  }}
+                >
+                  <label style={{ fontSize: "12px", color: "var(--muted)" }}>
+                    输出价格 ($ / 1M Tokens):
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={outputPrice}
+                    onChange={(e) => setOutputPrice(e.target.value)}
+                    style={{
+                      padding: "8px",
+                      fontSize: "13px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--line)",
+                      background: "var(--bg)",
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div
                 style={{ display: "flex", flexDirection: "column", gap: "4px" }}
               >
                 <label style={{ fontSize: "12px", color: "var(--muted)" }}>
-                  输出价格 ($ / 1M Tokens):
+                  单位单价 ($ /{" "}
+                  {editingPricingUnit === "per_image"
+                    ? "张"
+                    : editingPricingUnit === "per_video_second"
+                      ? "秒"
+                      : editingPricingUnit === "per_audio_second"
+                        ? "秒"
+                        : "次"}
+                  ):
                 </label>
                 <input
                   type="number"
-                  step="0.01"
-                  value={outputPrice}
-                  onChange={(e) => setOutputPrice(e.target.value)}
+                  step="0.001"
+                  value={unitPrice}
+                  onChange={(e) => setUnitPrice(e.target.value)}
+                  placeholder="例如: 0.040"
                   style={{
                     padding: "8px",
                     fontSize: "13px",
@@ -804,7 +1035,7 @@ export function AnalyticsView() {
                   }}
                 />
               </div>
-            </div>
+            )}
 
             {/* List Existing Custom Pricing */}
             {pricingsQuery.data && pricingsQuery.data.length > 0 && (
@@ -816,44 +1047,83 @@ export function AnalyticsView() {
                     marginBottom: "4px",
                   }}
                 >
-                  已配置的自定义单价:
+                  已配置的自定义单价 (点击可快速载入编辑):
                 </div>
                 <div
                   style={{
-                    maxHeight: "120px",
+                    maxHeight: "140px",
                     overflowY: "auto",
                     display: "flex",
                     flexDirection: "column",
                     gap: "4px",
                   }}
                 >
-                  {pricingsQuery.data.map((pr: ModelPricing) => (
-                    <div
-                      key={pr.modelId}
-                      onClick={() =>
-                        openPricingEditor(
-                          pr.modelId,
-                          pr.inputPerM,
-                          pr.outputPerM,
-                        )
-                      }
-                      style={{
-                        padding: "4px 8px",
-                        borderRadius: "4px",
-                        background: "var(--bg)",
-                        border: "1px solid var(--line)",
-                        fontSize: "11px",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <span style={{ fontWeight: 600 }}>{pr.modelId}</span>
-                      <span>
-                        In: ${pr.inputPerM}/M · Out: ${pr.outputPerM}/M
-                      </span>
-                    </div>
-                  ))}
+                  {pricingsQuery.data.map((pr: ModelPricing) => {
+                    const isOutdated = pr.updatedAt
+                      ? (Date.now() - new Date(pr.updatedAt).getTime()) /
+                          (1000 * 3600 * 24) >
+                        30
+                      : false;
+
+                    const unitLabel =
+                      pr.pricingUnit === "per_image"
+                        ? `$${pr.pricePerUnit}/张`
+                        : pr.pricingUnit === "per_video_second"
+                          ? `$${pr.pricePerUnit}/秒`
+                          : pr.pricingUnit === "per_call"
+                            ? `$${pr.pricePerUnit}/次`
+                            : pr.pricingUnit === "per_audio_second"
+                              ? `$${pr.pricePerUnit}/秒`
+                              : `In: $${pr.inputPerM} · Out: $${pr.outputPerM}`;
+
+                    return (
+                      <div
+                        key={pr.modelId}
+                        onClick={() =>
+                          openPricingEditor(
+                            pr.modelId,
+                            pr.inputPerM,
+                            pr.outputPerM,
+                            pr.pricingUnit,
+                            pr.pricePerUnit,
+                            pr.providerId,
+                          )
+                        }
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: "4px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--line)",
+                          fontSize: "11px",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <span style={{ fontWeight: 600 }}>{pr.modelId}</span>
+                          {isOutdated ? (
+                            <span
+                              style={{ color: "#f59e0b", fontSize: "10px" }}
+                              title="超过30天未更新报价，请核对官方最新单价"
+                            >
+                              ⚠️ 可能过期
+                            </span>
+                          ) : null}
+                        </div>
+                        <span style={{ color: "var(--muted)" }}>
+                          {unitLabel}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -887,8 +1157,11 @@ export function AnalyticsView() {
                 onClick={() => {
                   savePricingMutation.mutate({
                     modelId: editingModelId.trim(),
+                    providerId: editingProviderId.trim() || undefined,
                     inputPerM: Number.parseFloat(inputPrice) || 0,
                     outputPerM: Number.parseFloat(outputPrice) || 0,
+                    pricingUnit: editingPricingUnit,
+                    pricePerUnit: Number.parseFloat(unitPrice) || 0,
                   });
                 }}
               >

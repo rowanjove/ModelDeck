@@ -800,9 +800,26 @@ export interface AgentMemoryInput {
 // 5. Model Pricing & Analytics
 export interface ModelPricing {
   modelId: string;
+  providerId?: string;
   inputPerM: number;
   outputPerM: number;
+  pricingUnit?: string;
+  pricePerUnit?: number;
+  source?: string;
   currency: string;
+  updatedAt?: string;
+}
+
+export interface CostEstimationResult {
+  hasPricing: boolean;
+  currency: string;
+  estimatedCostMin: number;
+  estimatedCostMax: number;
+  pricingUnit: string;
+  source: string;
+  updatedAt?: string | null;
+  isOutdated: boolean;
+  note: string;
 }
 
 export interface ModelUsageStat {
@@ -811,6 +828,9 @@ export interface ModelUsageStat {
   taskCount: number;
   totalTokens: number;
   costUsd: number;
+  officialCostUsd?: number;
+  estimatedCostUsd?: number;
+  meteringSource?: string; // "official" | "estimated" | "unmetered" | "mixed"
   avgLatencyMs: number;
 }
 
@@ -820,6 +840,8 @@ export interface ProviderUsageStat {
   taskCount: number;
   totalTokens: number;
   costUsd: number;
+  officialCostUsd?: number;
+  estimatedCostUsd?: number;
 }
 
 export interface DailyStat {
@@ -827,6 +849,8 @@ export interface DailyStat {
   taskCount: number;
   totalTokens: number;
   costUsd: number;
+  officialCostUsd?: number;
+  estimatedCostUsd?: number;
 }
 
 export interface AnalyticsSummary {
@@ -837,6 +861,12 @@ export interface AnalyticsSummary {
   totalCompletionTokens: number;
   totalTokens: number;
   estimatedCostUsd: number;
+  officialCostUsd?: number;
+  estimatedPortionCostUsd?: number;
+  totalCostUsd?: number;
+  officialTaskCount?: number;
+  estimatedTaskCount?: number;
+  unmeteredTaskCount?: number;
   avgLatencyMs: number;
   modalityCounts: Record<string, number>;
   topModels: ModelUsageStat[];

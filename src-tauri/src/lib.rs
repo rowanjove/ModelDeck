@@ -108,6 +108,8 @@ pub fn run() {
             commands::conversations_compact,
             commands::analytics_get_summary,
             commands::analytics_set_pricing,
+            commands::analytics_set_pricing_detailed,
+            commands::analytics_estimate_cost,
             commands::analytics_list_pricing,
             commands::compare_text,
             commands::batch_generate,

@@ -21,6 +21,7 @@ import type {
   Conversation,
   ConversationDetail,
   ConversationUpdate,
+  CostEstimationResult,
   DevRequestInput,
   DevResponseOutput,
   DiagnosticBundle,
@@ -257,6 +258,24 @@ export const api = {
     outputPerM: number,
   ) =>
     invoke<void>("analytics_set_pricing", { modelId, inputPerM, outputPerM }),
+  analyticsSetPricingDetailed: (params: {
+    modelId: string;
+    providerId?: string;
+    inputPerM?: number;
+    outputPerM?: number;
+    pricingUnit?: string;
+    pricePerUnit?: number;
+    source?: string;
+    currency?: string;
+  }) => invoke<void>("analytics_set_pricing_detailed", params),
+  analyticsEstimateCost: (params: {
+    modality: string;
+    modelId: string;
+    providerId?: string;
+    promptChars?: number;
+    mediaCount?: number;
+    durationSeconds?: number;
+  }) => invoke<CostEstimationResult>("analytics_estimate_cost", params),
   analyticsListPricing: () => invoke<ModelPricing[]>("analytics_list_pricing"),
 
   // 6. Compare

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { api, asAppError } from "../../api";
+import { CostEstimationHint } from "../../components/CostEstimationHint";
 import { ErrorNote } from "../../components/ErrorNote";
 import { ImageThumb } from "../../components/ImageThumb";
 import { ParameterPanel } from "../../components/ParameterPanel";
@@ -707,7 +708,13 @@ export function VideoView({
                 视频生成目前由 ComfyUI、Generic HTTP、Replicate 与 fal.ai 执行。
               </p>
             ) : null}
-            <div className="inline-actions">
+            <div className="inline-actions" style={{ alignItems: "center" }}>
+              <CostEstimationHint
+                modality="video"
+                modelId={model.modelId}
+                providerId={provider?.id}
+                durationSeconds={5.0}
+              />
               <button
                 type="button"
                 className="primary"

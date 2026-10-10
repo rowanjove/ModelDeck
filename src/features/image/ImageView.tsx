@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, asAppError } from "../../api";
+import { CostEstimationHint } from "../../components/CostEstimationHint";
 import { ErrorNote } from "../../components/ErrorNote";
 import { ImageThumb } from "../../components/ImageThumb";
 import { ParameterPanel } from "../../components/ParameterPanel";
@@ -906,7 +907,13 @@ export function ImageView({
               </p>
             ) : null}
             {error ? <ErrorNote error={error} /> : null}
-            <div className="inline-actions">
+            <div className="inline-actions" style={{ alignItems: "center" }}>
+              <CostEstimationHint
+                modality="image"
+                modelId={model.modelId}
+                providerId={provider?.id}
+                mediaCount={1}
+              />
               <button
                 type="button"
                 className="primary"

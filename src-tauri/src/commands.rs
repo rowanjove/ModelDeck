@@ -848,6 +848,55 @@ pub async fn analytics_set_pricing(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn analytics_set_pricing_detailed(
+    state: State<'_, AppState>,
+    model_id: String,
+    provider_id: Option<String>,
+    input_per_m: Option<f64>,
+    output_per_m: Option<f64>,
+    pricing_unit: Option<String>,
+    price_per_unit: Option<f64>,
+    source: Option<String>,
+    currency: Option<String>,
+) -> Result<(), AppError> {
+    services::analytics::set_pricing_detailed(
+        &state.db,
+        &model_id,
+        &provider_id.unwrap_or_default(),
+        input_per_m.unwrap_or(0.0),
+        output_per_m.unwrap_or(0.0),
+        &pricing_unit.unwrap_or_else(|| "per_1m_tokens".to_string()),
+        price_per_unit.unwrap_or(0.0),
+        &source.unwrap_or_else(|| "custom_user".to_string()),
+        &currency.unwrap_or_else(|| "USD".to_string()),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn analytics_estimate_cost(
+    state: State<'_, AppState>,
+    modality: String,
+    model_id: String,
+    provider_id: Option<String>,
+    prompt_chars: Option<usize>,
+    media_count: Option<usize>,
+    duration_seconds: Option<f64>,
+) -> Result<services::analytics::CostEstimationResult, AppError> {
+    services::analytics::estimate_task_cost(
+        &state.db,
+        &modality,
+        &model_id,
+        provider_id.as_deref(),
+        prompt_chars,
+        media_count,
+        duration_seconds,
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn analytics_list_pricing(
     state: State<'_, AppState>,
 ) -> Result<Vec<services::analytics::ModelPricing>, AppError> {

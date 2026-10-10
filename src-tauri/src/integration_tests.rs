@@ -6011,3 +6011,214 @@ async fn test_release_version_consistency_and_metadata() {
         "currentUser"
     );
 }
+
+#[tokio::test]
+async fn t14_multimodal_pricing_metering_sources_and_estimation_test() {
+    let (pool, secrets, dir) = setup().await;
+
+    // 1. 设置多模态定价规则
+    services::analytics::set_pricing_detailed(
+        &pool,
+        "dall-e-3",
+        "mock_prov",
+        0.0,
+        0.0,
+        "per_image",
+        0.040,
+        "custom_user",
+        "USD",
+    )
+    .await
+    .unwrap();
+
+    services::analytics::set_pricing_detailed(
+        &pool,
+        "cogvideox",
+        "mock_prov",
+        0.0,
+        0.0,
+        "per_video_second",
+        0.060,
+        "custom_user",
+        "USD",
+    )
+    .await
+    .unwrap();
+
+    let pricings = services::analytics::list_pricing(&pool).await.unwrap();
+    assert!(pricings.iter().any(|p| p.model_id == "dall-e-3"
+        && p.pricing_unit == "per_image"
+        && (p.price_per_unit - 0.040).abs() < 1e-4));
+    assert!(pricings.iter().any(|p| p.model_id == "cogvideox"
+        && p.pricing_unit == "per_video_second"
+        && (p.price_per_unit - 0.060).abs() < 1e-4));
+
+    // 2. 验证预估成本接口 (estimate_task_cost)
+    let est_img = services::analytics::estimate_task_cost(
+        &pool,
+        "image",
+        "dall-e-3",
+        Some("mock_prov"),
+        None,
+        Some(2),
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(est_img.has_pricing);
+    assert_eq!(est_img.pricing_unit, "per_image");
+    assert!((est_img.estimated_cost_min - 0.080).abs() < 1e-4);
+
+    let est_vid = services::analytics::estimate_task_cost(
+        &pool,
+        "video",
+        "cogvideox",
+        Some("mock_prov"),
+        None,
+        None,
+        Some(10.0),
+    )
+    .await
+    .unwrap();
+    assert!(est_vid.has_pricing);
+    assert_eq!(est_vid.pricing_unit, "per_video_second");
+    assert!((est_vid.estimated_cost_min - 0.60).abs() < 1e-4);
+
+    let est_unmetered = services::analytics::estimate_task_cost(
+        &pool,
+        "image",
+        "unknown-local-flux-custom",
+        None,
+        None,
+        Some(1),
+        None,
+    )
+    .await
+    .unwrap();
+    // flux-custom matches flux catalog fallback or none
+    assert!(est_unmetered.has_pricing); // matched flux catalog
+
+    // 3. 创建 Provider & 记录多模态任务
+    let provider = services::providers::create(
+        &pool,
+        secrets.as_ref(),
+        ProviderInput {
+            name: "Mock Provider T14".to_string(),
+            provider_type: ProviderType::OpenaiCompatible,
+            base_url: "http://127.0.0.1:9".to_string(),
+            api_key: None,
+            clear_api_key: false,
+            headers: BTreeMap::new(),
+            timeout_ms: 30_000,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let text_model = services::models::create(
+        &pool,
+        ModelInput {
+            name: "GPT-4o".to_string(),
+            provider_id: provider.id.clone(),
+            model_id: "gpt-4o".to_string(),
+            modality: Modality::Text,
+            capabilities: json!({ "streaming": false }),
+            parameters: vec![],
+            constraints: vec![],
+            transport: None,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    // 任务 A: 官方精准 Token 计量 (official)
+    services::history::record_text_task(
+        &pool,
+        &dir,
+        NewTextTask {
+            kind: "text_to_text".to_string(),
+            provider_id: provider.id.clone(),
+            provider_name: provider.name.clone(),
+            model_id: text_model.id.clone(),
+            model_name: text_model.name.clone(),
+            model_api_id: "gpt-4o".to_string(),
+            prompt: "Hello".to_string(),
+            system_prompt: None,
+            images: vec![],
+            extra: None,
+            conversation_id: None,
+            parameters: Map::new(),
+            status: "completed".to_string(),
+            output_text: Some("World".to_string()),
+            raw_request: None,
+            raw_response: Some(json!({
+                "usage": { "prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500 }
+            })),
+            error: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // 任务 B: 图像生成估算 (estimated)
+    services::history::record_image_task(
+        &pool,
+        services::history::NewImageTask {
+            id: uuid::Uuid::new_v4().to_string(),
+            provider_id: provider.id.clone(),
+            provider_name: provider.name.clone(),
+            model_id: "img_mod".to_string(),
+            model_name: "DALL-E 3".to_string(),
+            model_api_id: "dall-e-3".to_string(),
+            prompt: "cyberpunk cat".to_string(),
+            negative_prompt: None,
+            source_image: None,
+            mask: None,
+            reference_images: vec![],
+            extra: None,
+            parameters: {
+                let mut map = Map::new();
+                map.insert("n".to_string(), json!(1));
+                map
+            },
+            status: "completed".to_string(),
+            outputs: vec![],
+            raw_request: None,
+            raw_response: Some(json!({ "created": 123 })),
+            error: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // 4. 获取 Summary 并验证三态分类
+    let summary = services::analytics::get_summary(&pool).await.unwrap();
+    assert_eq!(summary.total_tasks, 2);
+    assert_eq!(summary.official_task_count, 1);
+    assert_eq!(summary.estimated_task_count, 1);
+    assert_eq!(summary.unmetered_task_count, 0);
+    assert!(summary.official_cost_usd > 0.0);
+    assert!(summary.estimated_portion_cost_usd > 0.0);
+    assert!(
+        (summary.total_cost_usd - (summary.official_cost_usd + summary.estimated_portion_cost_usd))
+            .abs()
+            < 1e-4
+    );
+
+    let gpt_stat = summary
+        .top_models
+        .iter()
+        .find(|m| m.model_id == "gpt-4o")
+        .unwrap();
+    assert_eq!(gpt_stat.metering_source, "official");
+    let dalle_stat = summary
+        .top_models
+        .iter()
+        .find(|m| m.model_id == "dall-e-3")
+        .unwrap();
+    assert_eq!(dalle_stat.metering_source, "estimated");
+
+    let _ = std::fs::remove_dir_all(dir);
+}

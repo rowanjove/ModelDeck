@@ -82,6 +82,10 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), AppError> {
             21_i64,
             include_str!("../migrations/021_task_recovery_fields.sql"),
         ),
+        (
+            22_i64,
+            include_str!("../migrations/022_task_consistency_fields.sql"),
+        ),
     ] {
         let applied: Option<i64> =
             sqlx::query_scalar("SELECT version FROM schema_migrations WHERE version = ?")

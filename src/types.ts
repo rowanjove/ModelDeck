@@ -1151,6 +1151,10 @@ export interface TaskEvent {
   message?: string | null;
   outputAsset?: unknown;
   error?: string | null;
+  errorCode?: string | null;
+  retryable?: boolean | null;
+  remoteJobId?: string | null;
+  billingRisk?: string | null;
   timestamp: string;
 }
 
@@ -1162,6 +1166,10 @@ export interface TaskInfo {
   stage?: string | null;
   message?: string | null;
   error?: string | null;
+  errorCode?: string | null;
+  retryable?: boolean | null;
+  remoteJobId?: string | null;
+  billingRisk?: string | null;
   output?: unknown;
   createdAt: string;
   updatedAt: string;

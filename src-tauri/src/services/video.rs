@@ -554,7 +554,7 @@ async fn persist(data_dir: &Path, task_id: &str, result: &mut VideoResult) -> Re
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|err| AppError::storage(format!("无法创建数据目录: {err}")))?;
-    let mut saved = Vec::new();
+    let mut saved: Vec<crate::canonical::GeneratedVideo> = Vec::new();
     let total_binaries = result.binaries.len();
     for (index, binary) in result.binaries.iter().enumerate() {
         let path = dir.join(format!(
@@ -562,9 +562,24 @@ async fn persist(data_dir: &Path, task_id: &str, result: &mut VideoResult) -> Re
             media::extension_for(&binary.mime_type)
         ));
         crate::storage_util::ensure_within_dir(data_dir, &path)?;
-        crate::storage_util::atomic_write_async(&path, &binary.bytes)
-            .await
-            .map_err(|err| AppError::storage(format!("无法保存视频文件: {err}")))?;
+        if binary.bytes.is_empty() {
+            for s in &saved {
+                let _ = tokio::fs::remove_file(&s.path).await;
+            }
+            return Err(AppError::validation("生成的视频内容为空 (0 字节)"));
+        }
+        if media::sniff_video(&binary.bytes).is_none() {
+            for s in &saved {
+                let _ = tokio::fs::remove_file(&s.path).await;
+            }
+            return Err(AppError::validation("生成的内容不是合法的视频格式"));
+        }
+        if let Err(err) = crate::storage_util::atomic_write_async(&path, &binary.bytes).await {
+            for s in &saved {
+                let _ = tokio::fs::remove_file(&s.path).await;
+            }
+            return Err(err);
+        }
         saved.push(crate::canonical::GeneratedVideo {
             path: path.to_string_lossy().to_string(),
             mime_type: binary.mime_type.clone(),
@@ -572,6 +587,9 @@ async fn persist(data_dir: &Path, task_id: &str, result: &mut VideoResult) -> Re
     }
     result.binaries.clear();
     if saved.len() < total_binaries || saved.is_empty() {
+        for s in &saved {
+            let _ = tokio::fs::remove_file(&s.path).await;
+        }
         return Err(AppError::storage("视频文件未能完整保存"));
     }
     result.videos = saved;
@@ -688,4 +706,61 @@ async fn remember(
         }
     }
     record_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn persist_rejects_empty_binary() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ai-wb-test-vid-{}", uuid::Uuid::new_v4()));
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let mut result = VideoResult {
+            videos: vec![],
+            latency_ms: 0,
+            provider_id: "p".into(),
+            provider_name: "p".into(),
+            model_definition_id: "m".into(),
+            model_name: "m".into(),
+            model_id: "m".into(),
+            raw_request: serde_json::json!({}),
+            raw_response: serde_json::json!({}),
+            status: 200,
+            binaries: vec![crate::canonical::VideoBinary {
+                bytes: vec![],
+                mime_type: "video/mp4".to_string(),
+            }],
+        };
+        let err = persist(&temp_dir, &task_id, &mut result).await.unwrap_err();
+        assert!(err.message.contains("为空 (0 字节)"));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn persist_rejects_invalid_media() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ai-wb-test-vid-bad-{}", uuid::Uuid::new_v4()));
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let mut result = VideoResult {
+            videos: vec![],
+            latency_ms: 0,
+            provider_id: "p".into(),
+            provider_name: "p".into(),
+            model_definition_id: "m".into(),
+            model_name: "m".into(),
+            model_id: "m".into(),
+            raw_request: serde_json::json!({}),
+            raw_response: serde_json::json!({}),
+            status: 200,
+            binaries: vec![crate::canonical::VideoBinary {
+                bytes: vec![1, 2, 3, 4],
+                mime_type: "video/mp4".to_string(),
+            }],
+        };
+        let err = persist(&temp_dir, &task_id, &mut result).await.unwrap_err();
+        assert!(err.message.contains("不是合法的视频格式"));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
 }

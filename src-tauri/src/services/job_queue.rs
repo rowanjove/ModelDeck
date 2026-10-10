@@ -33,6 +33,14 @@ pub struct TaskEvent {
     pub message: Option<String>,
     pub output_asset: Option<Value>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_job_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing_risk: Option<String>,
     pub timestamp: String,
 }
 
@@ -46,6 +54,14 @@ pub struct TaskInfo {
     pub stage: Option<String>,
     pub message: Option<String>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_job_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing_risk: Option<String>,
     pub output: Option<Value>,
     pub created_at: String,
     pub updated_at: String,
@@ -112,7 +128,7 @@ impl JobQueue {
 
     pub async fn hydrate_recent_tasks(&self) -> Result<(), AppError> {
         let rows = sqlx::query(
-            "SELECT id, modality, status, error, queue_output_json, created_at,
+            "SELECT id, modality, status, error, queue_output_json, remote_job_id, billing_risk, error_code, retryable, created_at,
                     COALESCE(completed_at, created_at) AS updated_at
              FROM generation_tasks
              WHERE status != 'claimed'
@@ -127,6 +143,14 @@ impl JobQueue {
             let raw_output: Option<String> =
                 row.try_get("queue_output_json").map_err(AppError::db)?;
             let output = raw_output.and_then(|value| serde_json::from_str(&value).ok());
+            let remote_job_id: Option<String> = row.try_get("remote_job_id").ok().flatten();
+            let billing_risk: Option<String> = row.try_get("billing_risk").ok().flatten();
+            let error_code: Option<String> = row.try_get("error_code").ok().flatten();
+            let retryable: Option<bool> = row
+                .try_get::<Option<i64>, _>("retryable")
+                .ok()
+                .flatten()
+                .map(|v| v != 0);
             let task = TaskInfo {
                 id: row.try_get("id").map_err(AppError::db)?,
                 modality: row.try_get("modality").map_err(AppError::db)?,
@@ -135,6 +159,10 @@ impl JobQueue {
                 stage: None,
                 message: None,
                 error: row.try_get("error").map_err(AppError::db)?,
+                error_code,
+                retryable,
+                remote_job_id,
+                billing_risk,
                 output,
                 created_at: row.try_get("created_at").map_err(AppError::db)?,
                 updated_at: row.try_get("updated_at").map_err(AppError::db)?,
@@ -245,7 +273,7 @@ impl JobQueue {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn update_task_state(
+    pub async fn update_task_state_ext(
         &self,
         task_id: &str,
         modality: &str,
@@ -256,6 +284,10 @@ impl JobQueue {
         message: Option<&str>,
         output_asset: Option<Value>,
         error: Option<&str>,
+        error_code: Option<&str>,
+        retryable: Option<bool>,
+        remote_job_id: Option<&str>,
+        billing_risk: Option<&str>,
     ) {
         if self
             .deleted_tasks
@@ -265,6 +297,7 @@ impl JobQueue {
         {
             return;
         }
+        let mut retryable = retryable;
         let now = now_iso();
         let is_terminal = matches!(
             status,
@@ -276,21 +309,33 @@ impl JobQueue {
         let mut message_owned = message.map(str::to_string);
         let mut error_owned = error.map(str::to_string);
         let mut output_asset_owned = output_asset.clone();
+        let mut error_code_owned = error_code.map(str::to_string);
+        let mut remote_job_id_owned = remote_job_id.map(str::to_string);
+        let mut billing_risk_owned = billing_risk.map(str::to_string);
 
         if is_terminal {
             let output_json = output_asset
                 .as_ref()
                 .and_then(|value| serde_json::to_string(value).ok());
+            let retryable_int = retryable.map(|r| if r { 1_i64 } else { 0_i64 });
             let result = sqlx::query(
                 "UPDATE generation_tasks
                  SET status = ?, error = COALESCE(?, error), completed_at = COALESCE(?, completed_at),
-                     queue_output_json = COALESCE(?, queue_output_json)
+                     queue_output_json = COALESCE(?, queue_output_json),
+                     remote_job_id = COALESCE(?, remote_job_id),
+                     billing_risk = COALESCE(?, billing_risk),
+                     error_code = COALESCE(?, error_code),
+                     retryable = COALESCE(?, retryable)
                  WHERE id = ? AND (status NOT IN ('completed', 'failed', 'cancelled', 'interrupted', 'unknown_submission') OR status = ?)",
             )
             .bind(status)
             .bind(error)
             .bind(&now)
             .bind(output_json.as_deref())
+            .bind(remote_job_id)
+            .bind(billing_risk)
+            .bind(error_code)
+            .bind(retryable_int)
             .bind(task_id)
             .bind(status)
             .execute(&self.db)
@@ -312,7 +357,7 @@ impl JobQueue {
             };
             if result.rows_affected() == 0 {
                 let row = sqlx::query(
-                    "SELECT status, error, queue_output_json FROM generation_tasks WHERE id = ?",
+                    "SELECT status, error, queue_output_json, remote_job_id, billing_risk, error_code, retryable FROM generation_tasks WHERE id = ?",
                 )
                 .bind(task_id)
                 .fetch_optional(&self.db)
@@ -342,6 +387,22 @@ impl JobQueue {
                 }
                 event_type_owned = status_owned.clone();
                 error_owned = row.try_get("error").ok();
+                if remote_job_id_owned.is_none() {
+                    remote_job_id_owned = row.try_get("remote_job_id").ok().flatten();
+                }
+                if billing_risk_owned.is_none() {
+                    billing_risk_owned = row.try_get("billing_risk").ok().flatten();
+                }
+                if error_code_owned.is_none() {
+                    error_code_owned = row.try_get("error_code").ok().flatten();
+                }
+                if retryable.is_none() {
+                    retryable = row
+                        .try_get::<Option<i64>, _>("retryable")
+                        .ok()
+                        .flatten()
+                        .map(|v| v != 0);
+                }
                 output_asset_owned = row
                     .try_get::<Option<String>, _>("queue_output_json")
                     .ok()
@@ -385,6 +446,18 @@ impl JobQueue {
                 if error_owned.is_some() {
                     entry.error = error_owned.clone();
                 }
+                if error_code_owned.is_some() {
+                    entry.error_code = error_code_owned.clone();
+                }
+                if retryable.is_some() {
+                    entry.retryable = retryable;
+                }
+                if remote_job_id_owned.is_some() {
+                    entry.remote_job_id = remote_job_id_owned.clone();
+                }
+                if billing_risk_owned.is_some() {
+                    entry.billing_risk = billing_risk_owned.clone();
+                }
                 if output_asset_owned.is_some() {
                     entry.output = output_asset_owned.clone();
                 }
@@ -399,6 +472,10 @@ impl JobQueue {
                         stage: stage_owned.clone(),
                         message: message_owned.clone(),
                         error: error_owned.clone(),
+                        error_code: error_code_owned.clone(),
+                        retryable,
+                        remote_job_id: remote_job_id_owned.clone(),
+                        billing_risk: billing_risk_owned.clone(),
                         output: output_asset_owned.clone(),
                         created_at: now.clone(),
                         updated_at: now.clone(),
@@ -496,10 +573,160 @@ impl JobQueue {
             message: message_owned,
             output_asset: output_asset_owned,
             error: error_owned,
+            error_code: error_code_owned,
+            retryable,
+            remote_job_id: remote_job_id_owned,
+            billing_risk: billing_risk_owned,
             timestamp: now,
         };
 
         self.emit(&event_type_owned, &event);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn update_task_state(
+        &self,
+        task_id: &str,
+        modality: &str,
+        event_type: &str,
+        status: &str,
+        progress: Option<f64>,
+        stage: Option<&str>,
+        message: Option<&str>,
+        output_asset: Option<Value>,
+        error: Option<&str>,
+    ) {
+        self.update_task_state_ext(
+            task_id,
+            modality,
+            event_type,
+            status,
+            progress,
+            stage,
+            message,
+            output_asset,
+            error,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    }
+
+    pub async fn classify_timeout_failure(
+        &self,
+        task_id: &str,
+        modality: &str,
+        default_secs: u64,
+    ) -> (String, String, bool, Option<String>, String) {
+        let row = sqlx::query(
+            "SELECT execution_phase, remote_job_id, billing_risk FROM generation_tasks WHERE id = ?",
+        )
+        .bind(task_id)
+        .fetch_optional(&self.db)
+        .await
+        .ok()
+        .flatten();
+
+        let phase = row
+            .as_ref()
+            .and_then(|r| r.try_get::<Option<String>, _>("execution_phase").ok())
+            .flatten();
+        let remote_id = row
+            .as_ref()
+            .and_then(|r| r.try_get::<Option<String>, _>("remote_job_id").ok())
+            .flatten();
+
+        match phase.as_deref() {
+            Some("submitting") => (
+                format!("{modality}任务向服务商提交超时（超过 {default_secs} 秒，尚未收到远端受理确认，可能存在计费风险）"),
+                "submit_timeout".to_string(),
+                false,
+                remote_id,
+                "possible".to_string(),
+            ),
+            Some("downloading") => (
+                format!("{modality}生成已完成，但产物下载超时（超过 {default_secs} 秒，可重新尝试下载）"),
+                "download_timeout".to_string(),
+                true,
+                remote_id,
+                "confirmed".to_string(),
+            ),
+            Some("running") if remote_id.is_some() => {
+                let rid = remote_id.as_deref().unwrap_or_default();
+                (
+                    format!("远端{modality}生成等待超时（已等待超过 {default_secs} 秒）。已保存远端任务 ID [{rid}]，远端可能仍在执行并计费，可稍后在历史中刷新"),
+                    "generation_timeout".to_string(),
+                    false,
+                    remote_id,
+                    "possible".to_string(),
+                )
+            }
+            _ => (
+                format!("{modality}任务执行超时 (超过 {default_secs} 秒)"),
+                "timeout".to_string(),
+                true,
+                remote_id,
+                "none".to_string(),
+            ),
+        }
+    }
+
+    pub async fn classify_cancellation(
+        &self,
+        task_id: &str,
+        modality: &str,
+    ) -> (String, bool, Option<String>, String) {
+        let row = sqlx::query(
+            "SELECT execution_phase, remote_job_id, billing_risk FROM generation_tasks WHERE id = ?",
+        )
+        .bind(task_id)
+        .fetch_optional(&self.db)
+        .await
+        .ok()
+        .flatten();
+
+        let phase = row
+            .as_ref()
+            .and_then(|r| r.try_get::<Option<String>, _>("execution_phase").ok())
+            .flatten();
+        let remote_id = row
+            .as_ref()
+            .and_then(|r| r.try_get::<Option<String>, _>("remote_job_id").ok())
+            .flatten();
+
+        match phase.as_deref() {
+            Some("queued") | None => (
+                format!("{modality}任务已在排队阶段取消（未向服务商发起网络请求，无费用）"),
+                true,
+                None,
+                "none".to_string(),
+            ),
+            Some("downloading") => (
+                format!("{modality}生成已完成，下载已取消"),
+                true,
+                remote_id,
+                "confirmed".to_string(),
+            ),
+            _ => {
+                if let Some(ref rid) = remote_id {
+                    (
+                        format!("客户端已停止等待{modality}任务。服务商不支持远端中断，远端任务 [{rid}] 可能仍在继续并产生费用"),
+                        false,
+                        remote_id,
+                        "possible".to_string(),
+                    )
+                } else {
+                    (
+                        format!("客户端已停止等待{modality}任务。由于请求已发出，远端服务商可能仍在继续执行并产生费用"),
+                        false,
+                        None,
+                        "possible".to_string(),
+                    )
+                }
+            }
+        }
     }
 
     pub fn get_task_info(&self, task_id: &str) -> Option<TaskInfo> {
@@ -539,16 +766,22 @@ impl JobQueue {
             .get(task_id)
             .map(|task| task.modality.clone());
         if let Some(modality) = modality {
-            self.update_task_state(
+            let (msg, retryable, remote_id, billing_risk) =
+                self.classify_cancellation(task_id, &modality).await;
+            self.update_task_state_ext(
                 task_id,
                 &modality,
                 "cancelled",
                 "cancelled",
                 None,
                 Some("cancelled"),
-                Some("任务已取消"),
+                Some(&msg),
                 None,
                 None,
+                Some("cancelled"),
+                Some(retryable),
+                remote_id.as_deref(),
+                Some(&billing_risk),
             )
             .await;
         }
@@ -606,20 +839,26 @@ impl JobQueue {
         err: &AppError,
     ) {
         if cancel_flag.load(Ordering::Relaxed) || err.code == "cancelled" {
-            self.update_task_state(
+            let (msg, retryable, remote_id, billing_risk) =
+                self.classify_cancellation(task_id, modality).await;
+            self.update_task_state_ext(
                 task_id,
                 modality,
                 "cancelled",
                 "cancelled",
                 None,
                 Some("cancelled"),
-                Some("任务已取消"),
+                Some(&msg),
                 None,
                 None,
+                Some("cancelled"),
+                Some(retryable),
+                remote_id.as_deref(),
+                Some(&billing_risk),
             )
             .await;
         } else {
-            self.update_task_state(
+            self.update_task_state_ext(
                 task_id,
                 modality,
                 "failed",
@@ -629,6 +868,10 @@ impl JobQueue {
                 Some(&err.message),
                 None,
                 Some(&err.message),
+                Some(err.code),
+                Some(true),
+                None,
+                Some("none"),
             )
             .await;
         }
@@ -643,16 +886,22 @@ impl JobQueue {
         if !cancel_flag.load(Ordering::Relaxed) {
             return false;
         }
-        self.update_task_state(
+        let (msg, retryable, remote_id, billing_risk) =
+            self.classify_cancellation(task_id, modality).await;
+        self.update_task_state_ext(
             task_id,
             modality,
             "cancelled",
             "cancelled",
             None,
             Some("cancelled"),
-            Some("任务已取消"),
+            Some(&msg),
             None,
             None,
+            Some("cancelled"),
+            Some(retryable),
+            remote_id.as_deref(),
+            Some(&billing_risk),
         )
         .await;
         self.unregister_cancel(task_id, cancel_flag);
@@ -710,6 +959,10 @@ impl JobQueue {
             message: Some(message.to_string()),
             output_asset: output,
             error: None,
+            error_code: None,
+            retryable: None,
+            remote_job_id: None,
+            billing_risk: None,
             timestamp: now,
         };
         self.emit(event_type, &event);
@@ -824,20 +1077,27 @@ impl JobQueue {
                     let is_cancelled =
                         cancel_flag.load(Ordering::Relaxed) || err.code == "cancelled";
                     if is_cancelled {
-                        this.update_task_state(
+                        let (msg, retryable, remote_id, billing_risk) =
+                            this.classify_cancellation(&id_clone, "image").await;
+                        this.update_task_state_ext(
                             &id_clone,
                             "image",
                             "cancelled",
                             "cancelled",
                             None,
                             Some("cancelled"),
-                            Some("任务已取消"),
+                            Some(&msg),
                             None,
                             None,
+                            Some("cancelled"),
+                            Some(retryable),
+                            remote_id.as_deref(),
+                            Some(&billing_risk),
                         )
                         .await;
                     } else {
-                        this.update_task_state(
+                        let retryable = crate::resilience::is_retryable(&err);
+                        this.update_task_state_ext(
                             &id_clone,
                             "image",
                             "failed",
@@ -847,29 +1107,38 @@ impl JobQueue {
                             Some(&err.message),
                             None,
                             Some(&err.message),
+                            Some(err.code),
+                            Some(retryable),
+                            None,
+                            Some("none"),
                         )
                         .await;
                     }
                 }
                 Err(_) => {
-                    let err_msg = "图像生成超时 (超过 300 秒)";
+                    let (err_msg, error_code, retryable, remote_id, billing_risk) =
+                        this.classify_timeout_failure(&id_clone, "image", 300).await;
                     let _ = crate::services::task_scheduler::update_task_status(
                         &this.db,
                         &id_clone,
                         TaskStatus::Failed,
-                        Some(err_msg),
+                        Some(&err_msg),
                     )
                     .await;
-                    this.update_task_state(
+                    this.update_task_state_ext(
                         &id_clone,
                         "image",
                         "failed",
                         "failed",
                         None,
                         Some("failed"),
-                        Some(err_msg),
+                        Some(&err_msg),
                         None,
-                        Some(err_msg),
+                        Some(&err_msg),
+                        Some(&error_code),
+                        Some(retryable),
+                        remote_id.as_deref(),
+                        Some(&billing_risk),
                     )
                     .await;
                 }
@@ -989,20 +1258,27 @@ impl JobQueue {
                     let is_cancelled =
                         cancel_flag.load(Ordering::Relaxed) || err.code == "cancelled";
                     if is_cancelled {
-                        this.update_task_state(
+                        let (msg, retryable, remote_id, billing_risk) =
+                            this.classify_cancellation(&id_clone, "video").await;
+                        this.update_task_state_ext(
                             &id_clone,
                             "video",
                             "cancelled",
                             "cancelled",
                             None,
                             Some("cancelled"),
-                            Some("视频生成已取消"),
+                            Some(&msg),
                             None,
                             None,
+                            Some("cancelled"),
+                            Some(retryable),
+                            remote_id.as_deref(),
+                            Some(&billing_risk),
                         )
                         .await;
                     } else {
-                        this.update_task_state(
+                        let retryable = crate::resilience::is_retryable(&err);
+                        this.update_task_state_ext(
                             &id_clone,
                             "video",
                             "failed",
@@ -1012,29 +1288,38 @@ impl JobQueue {
                             Some(&err.message),
                             None,
                             Some(&err.message),
+                            Some(err.code),
+                            Some(retryable),
+                            None,
+                            Some("none"),
                         )
                         .await;
                     }
                 }
                 Err(_) => {
-                    let err_msg = "视频任务执行超时 (超过 600 秒)";
+                    let (err_msg, error_code, retryable, remote_id, billing_risk) =
+                        this.classify_timeout_failure(&id_clone, "video", 600).await;
                     let _ = crate::services::task_scheduler::update_task_status(
                         &this.db,
                         &id_clone,
                         TaskStatus::Failed,
-                        Some(err_msg),
+                        Some(&err_msg),
                     )
                     .await;
-                    this.update_task_state(
+                    this.update_task_state_ext(
                         &id_clone,
                         "video",
                         "failed",
                         "failed",
                         None,
                         Some("failed"),
-                        Some(err_msg),
+                        Some(&err_msg),
                         None,
-                        Some(err_msg),
+                        Some(&err_msg),
+                        Some(&error_code),
+                        Some(retryable),
+                        remote_id.as_deref(),
+                        Some(&billing_risk),
                     )
                     .await;
                 }
@@ -1154,20 +1439,27 @@ impl JobQueue {
                     let is_cancelled =
                         cancel_flag.load(Ordering::Relaxed) || err.code == "cancelled";
                     if is_cancelled {
-                        this.update_task_state(
+                        let (msg, retryable, remote_id, billing_risk) =
+                            this.classify_cancellation(&id_clone, "audio").await;
+                        this.update_task_state_ext(
                             &id_clone,
                             "audio",
                             "cancelled",
                             "cancelled",
                             None,
                             Some("cancelled"),
-                            Some("音频任务已取消"),
+                            Some(&msg),
                             None,
                             None,
+                            Some("cancelled"),
+                            Some(retryable),
+                            remote_id.as_deref(),
+                            Some(&billing_risk),
                         )
                         .await;
                     } else {
-                        this.update_task_state(
+                        let retryable = crate::resilience::is_retryable(&err);
+                        this.update_task_state_ext(
                             &id_clone,
                             "audio",
                             "failed",
@@ -1177,29 +1469,38 @@ impl JobQueue {
                             Some(&err.message),
                             None,
                             Some(&err.message),
+                            Some(err.code),
+                            Some(retryable),
+                            None,
+                            Some("none"),
                         )
                         .await;
                     }
                 }
                 Err(_) => {
-                    let err_msg = "音频任务执行超时 (超过 300 秒)";
+                    let (err_msg, error_code, retryable, remote_id, billing_risk) =
+                        this.classify_timeout_failure(&id_clone, "audio", 300).await;
                     let _ = crate::services::task_scheduler::update_task_status(
                         &this.db,
                         &id_clone,
                         TaskStatus::Failed,
-                        Some(err_msg),
+                        Some(&err_msg),
                     )
                     .await;
-                    this.update_task_state(
+                    this.update_task_state_ext(
                         &id_clone,
                         "audio",
                         "failed",
                         "failed",
                         None,
                         Some("failed"),
-                        Some(err_msg),
+                        Some(&err_msg),
                         None,
-                        Some(err_msg),
+                        Some(&err_msg),
+                        Some(&error_code),
+                        Some(retryable),
+                        remote_id.as_deref(),
+                        Some(&billing_risk),
                     )
                     .await;
                 }
@@ -1286,16 +1587,22 @@ impl JobQueue {
 
             let is_cancelled = cancel_flag.load(Ordering::Relaxed);
             if is_cancelled {
-                this.update_task_state(
+                let (msg, retryable, remote_id, billing_risk) =
+                    this.classify_cancellation(&id_clone, "batch").await;
+                this.update_task_state_ext(
                     &id_clone,
                     "batch",
                     "cancelled",
                     "cancelled",
                     None,
                     Some("cancelled"),
-                    Some("批量生成已取消"),
+                    Some(&msg),
                     None,
                     None,
+                    Some("cancelled"),
+                    Some(retryable),
+                    remote_id.as_deref(),
+                    Some(&billing_risk),
                 )
                 .await;
             } else {
@@ -1317,20 +1624,27 @@ impl JobQueue {
                     }
                     Ok(Err(err)) => {
                         if err.code == "cancelled" {
-                            this.update_task_state(
+                            let (msg, retryable, remote_id, billing_risk) =
+                                this.classify_cancellation(&id_clone, "batch").await;
+                            this.update_task_state_ext(
                                 &id_clone,
                                 "batch",
                                 "cancelled",
                                 "cancelled",
                                 None,
                                 Some("cancelled"),
-                                Some("批量生成已取消"),
+                                Some(&msg),
                                 None,
                                 None,
+                                Some("cancelled"),
+                                Some(retryable),
+                                remote_id.as_deref(),
+                                Some(&billing_risk),
                             )
                             .await;
                         } else {
-                            this.update_task_state(
+                            let retryable = crate::resilience::is_retryable(&err);
+                            this.update_task_state_ext(
                                 &id_clone,
                                 "batch",
                                 "failed",
@@ -1340,22 +1654,31 @@ impl JobQueue {
                                 Some(&err.message),
                                 None,
                                 Some(&err.message),
+                                Some(err.code),
+                                Some(retryable),
+                                None,
+                                Some("none"),
                             )
                             .await;
                         }
                     }
                     Err(_) => {
-                        let err_msg = "批量生成超时";
-                        this.update_task_state(
+                        let (err_msg, error_code, retryable, remote_id, billing_risk) =
+                            this.classify_timeout_failure(&id_clone, "batch", 600).await;
+                        this.update_task_state_ext(
                             &id_clone,
                             "batch",
                             "failed",
                             "failed",
                             None,
                             Some("failed"),
-                            Some(err_msg),
+                            Some(&err_msg),
                             None,
-                            Some(err_msg),
+                            Some(&err_msg),
+                            Some(&error_code),
+                            Some(retryable),
+                            remote_id.as_deref(),
+                            Some(&billing_risk),
                         )
                         .await;
                     }
@@ -1469,16 +1792,22 @@ impl JobQueue {
 
             let is_cancelled = cancel_flag.load(Ordering::Relaxed);
             if is_cancelled {
-                this.update_task_state(
+                let (msg, retryable, remote_id, billing_risk) =
+                    this.classify_cancellation(&id_clone, "pipeline").await;
+                this.update_task_state_ext(
                     &id_clone,
                     "pipeline",
                     "cancelled",
                     "cancelled",
                     None,
                     Some("cancelled"),
-                    Some("工作流已取消"),
+                    Some(&msg),
                     None,
                     None,
+                    Some("cancelled"),
+                    Some(retryable),
+                    remote_id.as_deref(),
+                    Some(&billing_risk),
                 )
                 .await;
             } else {
@@ -1500,20 +1829,27 @@ impl JobQueue {
                     }
                     Ok(Err(err)) => {
                         if err.code == "cancelled" {
-                            this.update_task_state(
+                            let (msg, retryable, remote_id, billing_risk) =
+                                this.classify_cancellation(&id_clone, "pipeline").await;
+                            this.update_task_state_ext(
                                 &id_clone,
                                 "pipeline",
                                 "cancelled",
                                 "cancelled",
                                 None,
                                 Some("cancelled"),
-                                Some("工作流已取消"),
+                                Some(&msg),
                                 None,
                                 None,
+                                Some("cancelled"),
+                                Some(retryable),
+                                remote_id.as_deref(),
+                                Some(&billing_risk),
                             )
                             .await;
                         } else {
-                            this.update_task_state(
+                            let retryable = crate::resilience::is_retryable(&err);
+                            this.update_task_state_ext(
                                 &id_clone,
                                 "pipeline",
                                 "failed",
@@ -1523,22 +1859,32 @@ impl JobQueue {
                                 Some(&err.message),
                                 None,
                                 Some(&err.message),
+                                Some(err.code),
+                                Some(retryable),
+                                None,
+                                Some("none"),
                             )
                             .await;
                         }
                     }
                     Err(_) => {
-                        let err_msg = "工作流执行超时";
-                        this.update_task_state(
+                        let (err_msg, error_code, retryable, remote_id, billing_risk) = this
+                            .classify_timeout_failure(&id_clone, "pipeline", 600)
+                            .await;
+                        this.update_task_state_ext(
                             &id_clone,
                             "pipeline",
                             "failed",
                             "failed",
                             None,
                             Some("failed"),
-                            Some(err_msg),
+                            Some(&err_msg),
                             None,
-                            Some(err_msg),
+                            Some(&err_msg),
+                            Some(&error_code),
+                            Some(retryable),
+                            remote_id.as_deref(),
+                            Some(&billing_risk),
                         )
                         .await;
                     }
@@ -1635,5 +1981,196 @@ mod tests {
             serde_json::json!({"asset": "image.png"})
         );
         assert_eq!(queue.get_task_info(&id).unwrap().status, "completed");
+    }
+
+    #[tokio::test]
+    async fn test_classify_timeout_failure_scenarios() {
+        let pool = test_pool().await;
+        let id_submitting = "task-timeout-submitting";
+        sqlx::query(
+            "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, execution_phase, input_json, parameters_json, created_at)
+             VALUES (?, 'image', 'p', 'm', 'running', 'submitting', '{}', '{}', ?) ",
+        )
+        .bind(id_submitting)
+        .bind(now_iso())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let id_running_remote = "task-timeout-remote";
+        sqlx::query(
+            "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, execution_phase, remote_job_id, input_json, parameters_json, created_at)
+             VALUES (?, 'image', 'p', 'm', 'running', 'running', 'remote-xyz', '{}', '{}', ?) ",
+        )
+        .bind(id_running_remote)
+        .bind(now_iso())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let id_downloading = "task-timeout-download";
+        sqlx::query(
+            "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, execution_phase, input_json, parameters_json, created_at)
+             VALUES (?, 'image', 'p', 'm', 'running', 'downloading', '{}', '{}', ?) ",
+        )
+        .bind(id_downloading)
+        .bind(now_iso())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let queue = JobQueue::new(
+            pool.clone(),
+            Client::new(),
+            Arc::new(MemorySecretStore::default()),
+            std::env::temp_dir().join(format!("ai-wb-{id_submitting}")),
+            Arc::new(TaskScheduler::new()),
+            Arc::new(Mutex::new(HashMap::new())),
+            None,
+        );
+
+        // 1. submitting timeout
+        let (msg1, code1, retry1, _remote1, risk1) = queue
+            .classify_timeout_failure(id_submitting, "image", 60)
+            .await;
+        assert_eq!(code1, "submit_timeout");
+        assert!(!retry1);
+        assert_eq!(risk1, "possible");
+        assert!(msg1.contains("提交超时"));
+
+        // 2. remote generating timeout
+        let (msg2, code2, retry2, remote2, risk2) = queue
+            .classify_timeout_failure(id_running_remote, "image", 60)
+            .await;
+        assert_eq!(code2, "generation_timeout");
+        assert!(!retry2);
+        assert_eq!(remote2.as_deref(), Some("remote-xyz"));
+        assert_eq!(risk2, "possible");
+        assert!(msg2.contains("remote-xyz"));
+
+        // 3. downloading timeout
+        let (msg3, code3, retry3, _remote3, risk3) = queue
+            .classify_timeout_failure(id_downloading, "image", 60)
+            .await;
+        assert_eq!(code3, "download_timeout");
+        assert!(retry3);
+        assert_eq!(risk3, "confirmed");
+        assert!(msg3.contains("下载超时"));
+    }
+
+    #[tokio::test]
+    async fn test_classify_cancellation_semantics() {
+        let pool = test_pool().await;
+        let id_queued = "task-cancel-queued";
+        sqlx::query(
+            "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, execution_phase, input_json, parameters_json, created_at)
+             VALUES (?, 'video', 'p', 'm', 'queued', 'queued', '{}', '{}', ?) ",
+        )
+        .bind(id_queued)
+        .bind(now_iso())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let id_running = "task-cancel-running";
+        sqlx::query(
+            "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, execution_phase, remote_job_id, input_json, parameters_json, created_at)
+             VALUES (?, 'video', 'p', 'm', 'running', 'running', 'rem-vid', '{}', '{}', ?) ",
+        )
+        .bind(id_running)
+        .bind(now_iso())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let queue = JobQueue::new(
+            pool.clone(),
+            Client::new(),
+            Arc::new(MemorySecretStore::default()),
+            std::env::temp_dir().join(format!("ai-wb-{id_queued}")),
+            Arc::new(TaskScheduler::new()),
+            Arc::new(Mutex::new(HashMap::new())),
+            None,
+        );
+
+        // Queued cancellation: no billing risk
+        let (msg1, retry1, _, risk1) = queue.classify_cancellation(id_queued, "video").await;
+        assert!(msg1.contains("无费用"));
+        assert!(retry1);
+        assert_eq!(risk1, "none");
+
+        // Running cancellation: explicit warning that remote provider might still charge
+        let (msg2, retry2, remote2, risk2) = queue.classify_cancellation(id_running, "video").await;
+        assert!(msg2.contains("可能仍在继续") && msg2.contains("产生费用"));
+        assert!(!retry2);
+        assert_eq!(remote2.as_deref(), Some("rem-vid"));
+        assert_eq!(risk2, "possible");
+    }
+
+    #[tokio::test]
+    async fn test_update_task_state_ext_persistence() {
+        let pool = test_pool().await;
+        let id = "task-state-ext";
+        sqlx::query(
+            "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, input_json, parameters_json, created_at)
+             VALUES (?, 'image', 'p', 'm', 'queued', '{}', '{}', ?) ",
+        )
+        .bind(id)
+        .bind(now_iso())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let queue = JobQueue::new(
+            pool.clone(),
+            Client::new(),
+            Arc::new(MemorySecretStore::default()),
+            std::env::temp_dir().join(format!("ai-wb-{id}")),
+            Arc::new(TaskScheduler::new()),
+            Arc::new(Mutex::new(HashMap::new())),
+            None,
+        );
+
+        queue
+            .update_task_state_ext(
+                id,
+                "image",
+                "failed",
+                "failed",
+                None,
+                Some("failed"),
+                Some("远程生成超时"),
+                None,
+                Some("远程生成超时"),
+                Some("generation_timeout"),
+                Some(false),
+                Some("remote-job-999"),
+                Some("possible"),
+            )
+            .await;
+
+        let info = queue.get_task_info(id).unwrap();
+        assert_eq!(info.status, "failed");
+        assert_eq!(info.error_code.as_deref(), Some("generation_timeout"));
+        assert_eq!(info.retryable, Some(false));
+        assert_eq!(info.remote_job_id.as_deref(), Some("remote-job-999"));
+        assert_eq!(info.billing_risk.as_deref(), Some("possible"));
+
+        // Check DB row
+        let row = sqlx::query(
+            "SELECT status, error_code, retryable, remote_job_id, billing_risk FROM generation_tasks WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let ec: Option<String> = row.try_get("error_code").unwrap();
+        let ret: Option<bool> = row.try_get("retryable").unwrap();
+        let rem: Option<String> = row.try_get("remote_job_id").unwrap();
+        let risk: Option<String> = row.try_get("billing_risk").unwrap();
+        assert_eq!(ec.as_deref(), Some("generation_timeout"));
+        assert_eq!(ret, Some(false));
+        assert_eq!(rem.as_deref(), Some("remote-job-999"));
+        assert_eq!(risk.as_deref(), Some("possible"));
     }
 }

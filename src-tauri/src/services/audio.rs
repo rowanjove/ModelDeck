@@ -479,7 +479,7 @@ async fn persist(data_dir: &Path, task_id: &str, result: &mut AudioResult) -> Re
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|err| AppError::storage(format!("无法创建数据目录: {err}")))?;
-    let mut saved = Vec::new();
+    let mut saved: Vec<crate::canonical::GeneratedAudio> = Vec::new();
     let total_binaries = result.binaries.len();
     for (index, binary) in result.binaries.iter().enumerate() {
         let path = dir.join(format!(
@@ -487,9 +487,24 @@ async fn persist(data_dir: &Path, task_id: &str, result: &mut AudioResult) -> Re
             media::extension_for(&binary.mime_type)
         ));
         crate::storage_util::ensure_within_dir(data_dir, &path)?;
-        crate::storage_util::atomic_write_async(&path, &binary.bytes)
-            .await
-            .map_err(|err| AppError::storage(format!("无法保存音频文件: {err}")))?;
+        if binary.bytes.is_empty() {
+            for s in &saved {
+                let _ = tokio::fs::remove_file(&s.path).await;
+            }
+            return Err(AppError::validation("生成的音频内容为空 (0 字节)"));
+        }
+        if media::sniff_audio(&binary.bytes).is_none() {
+            for s in &saved {
+                let _ = tokio::fs::remove_file(&s.path).await;
+            }
+            return Err(AppError::validation("生成的内容不是合法的音频格式"));
+        }
+        if let Err(err) = crate::storage_util::atomic_write_async(&path, &binary.bytes).await {
+            for s in &saved {
+                let _ = tokio::fs::remove_file(&s.path).await;
+            }
+            return Err(err);
+        }
         saved.push(crate::canonical::GeneratedAudio {
             path: path.to_string_lossy().to_string(),
             mime_type: binary.mime_type.clone(),
@@ -497,6 +512,9 @@ async fn persist(data_dir: &Path, task_id: &str, result: &mut AudioResult) -> Re
     }
     result.binaries.clear();
     if saved.len() < total_binaries {
+        for s in &saved {
+            let _ = tokio::fs::remove_file(&s.path).await;
+        }
         return Err(AppError::storage("音频文件未能完整保存"));
     }
     if !result.transcript.trim().is_empty() {
@@ -655,4 +673,65 @@ async fn remember(
         }
     }
     record_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn persist_rejects_empty_binary() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ai-wb-test-aud-{}", uuid::Uuid::new_v4()));
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let mut result = AudioResult {
+            audios: vec![],
+            transcript: "".to_string(),
+            transcript_path: None,
+            latency_ms: 0,
+            provider_id: "p".into(),
+            provider_name: "p".into(),
+            model_definition_id: "m".into(),
+            model_name: "m".into(),
+            model_id: "m".into(),
+            raw_request: serde_json::json!({}),
+            raw_response: serde_json::json!({}),
+            status: 200,
+            binaries: vec![crate::canonical::AudioBinary {
+                bytes: vec![],
+                mime_type: "audio/mp3".to_string(),
+            }],
+        };
+        let err = persist(&temp_dir, &task_id, &mut result).await.unwrap_err();
+        assert!(err.message.contains("为空 (0 字节)"));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn persist_rejects_invalid_media() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ai-wb-test-aud-bad-{}", uuid::Uuid::new_v4()));
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let mut result = AudioResult {
+            audios: vec![],
+            transcript: "".to_string(),
+            transcript_path: None,
+            latency_ms: 0,
+            provider_id: "p".into(),
+            provider_name: "p".into(),
+            model_definition_id: "m".into(),
+            model_name: "m".into(),
+            model_id: "m".into(),
+            raw_request: serde_json::json!({}),
+            raw_response: serde_json::json!({}),
+            status: 200,
+            binaries: vec![crate::canonical::AudioBinary {
+                bytes: vec![9, 8, 7, 6],
+                mime_type: "audio/mp3".to_string(),
+            }],
+        };
+        let err = persist(&temp_dir, &task_id, &mut result).await.unwrap_err();
+        assert!(err.message.contains("不是合法的音频格式"));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
 }

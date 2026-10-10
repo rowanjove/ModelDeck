@@ -1152,6 +1152,13 @@ export interface DiagnosticItem {
   name: string;
   status: "ok" | "warn" | "error";
   detail: string;
+  failureReason?:
+    | "network"
+    | "credentials"
+    | "model"
+    | "disk"
+    | "webview2"
+    | "unknown";
 }
 
 export interface SystemDiagnosticsReport {
@@ -1167,6 +1174,13 @@ export interface DiagnosticBundle {
   sanitizedProviders: Record<string, unknown>[];
   storage: StorageReport;
   recentTaskErrors: Record<string, unknown>[];
+  recentLogs?: {
+    id: string;
+    level: string;
+    target: string;
+    message: string;
+    timestamp: string;
+  }[];
 }
 
 export interface TaskEvent {

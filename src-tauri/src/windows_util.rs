@@ -185,6 +185,11 @@ pub fn ensure_webview2() -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
+pub fn is_webview2_installed() -> bool {
+    true
+}
+
+#[cfg(not(windows))]
 pub fn show_fatal_error(message: &str) {
     eprintln!("Fatal error: {message}");
 }

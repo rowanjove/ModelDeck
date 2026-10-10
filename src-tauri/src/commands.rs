@@ -1329,7 +1329,8 @@ pub async fn db_verify_backup(backup_path: String) -> Result<(), AppError> {
 pub async fn diagnostics_run(
     state: State<'_, AppState>,
 ) -> Result<services::diagnostics::SystemDiagnosticsReport, AppError> {
-    services::diagnostics::run_diagnostics(&state.data_dir, &state.db).await
+    services::diagnostics::run_diagnostics(&state.data_dir, &state.db, Some(state.secrets.as_ref()))
+        .await
 }
 
 #[tauri::command]

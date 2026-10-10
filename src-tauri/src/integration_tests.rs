@@ -6222,3 +6222,128 @@ async fn t14_multimodal_pricing_metering_sources_and_estimation_test() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn t15_diagnostics_and_network_proxy_test() {
+    let (pool, secrets, dir) = setup().await;
+
+    // 1. 代理设置模式变更与校验
+    let init_proxy = services::network::get_proxy_settings(&pool).await.unwrap();
+    assert_eq!(init_proxy.mode, "system");
+
+    // 切换到直连 (none)
+    let none_proxy = services::network::set_proxy_settings(
+        &pool,
+        services::network::ProxySettings {
+            mode: "none".to_string(),
+            http_proxy: None,
+            socks5_proxy: None,
+            updated_at: "".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(none_proxy.mode, "none");
+    assert!(services::network::build_client_with_proxy(&none_proxy).is_ok());
+
+    // 切换到合法的 HTTP 代理
+    let http_proxy = services::network::set_proxy_settings(
+        &pool,
+        services::network::ProxySettings {
+            mode: "http".to_string(),
+            http_proxy: Some("http://127.0.0.1:8080".to_string()),
+            socks5_proxy: None,
+            updated_at: "".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(http_proxy.mode, "http");
+    assert_eq!(
+        http_proxy.http_proxy.as_deref(),
+        Some("http://127.0.0.1:8080")
+    );
+
+    // 尝试保存带认证用户名密码的代理应被拒绝
+    let bad_proxy = services::network::set_proxy_settings(
+        &pool,
+        services::network::ProxySettings {
+            mode: "http".to_string(),
+            http_proxy: Some("http://user:pass@127.0.0.1:8080".to_string()),
+            socks5_proxy: None,
+            updated_at: "".to_string(),
+        },
+    )
+    .await;
+    assert!(bad_proxy.is_err());
+
+    // 2. 插入测试数据：包含敏感真实密钥和带密钥的任务错误
+    let secret_key = "sk-super-secret-production-token-998877";
+    let cred_id = "cred-secret-prov";
+    secrets.set(cred_id, secret_key).unwrap();
+
+    sqlx::query(
+        "INSERT INTO providers (id, name, type, base_url, credential_id, headers_json, timeout_ms, enabled, created_at, updated_at)
+         VALUES ('prov-secret', 'Prod Provider', 'openai', 'https://api.openai.com/v1', ?, '{}', 30000, 1, '2026-10-10T00:00:00Z', '2026-10-10T00:00:00Z')"
+    )
+    .bind(cred_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, input_json, parameters_json, error, created_at)
+         VALUES ('task-leaked-err', 'text', 'prov-secret', 'gpt-4o', 'failed', '{\"prompt\": \"sensitive prompt\"}', '{}', ?, '2026-10-10T00:00:00Z')"
+    )
+    .bind(format!("Request failed 401 Unauthorized with token {}", secret_key))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 3. 运行一键系统自检
+    let report = services::diagnostics::run_diagnostics(&dir, &pool, Some(secrets.as_ref()))
+        .await
+        .unwrap();
+    assert!(!report.items.is_empty());
+    assert!(report.items.iter().any(|i| i.name == "SQLite Integrity"));
+    assert!(report.items.iter().any(|i| i.name == "WebView2 Runtime"));
+    assert!(report.items.iter().any(|i| i.name == "网络与代理连通性"));
+    assert!(report.items.iter().any(|i| i.name == "关键 Provider 凭据"));
+
+    // 4. 导出脱敏诊断包
+    let bundle =
+        services::diagnostics::export_diagnostic_bundle(&dir, &pool, Some(secrets.as_ref()))
+            .await
+            .unwrap();
+
+    // 验证 Providers 中无密钥泄露
+    for prov in &bundle.sanitized_providers {
+        let json_str = prov.to_string();
+        assert!(!json_str.contains(secret_key));
+    }
+
+    // 验证任务错误记录中密钥被脱敏，且含有 failureReason 归因
+    let task_err = bundle
+        .recent_task_errors
+        .iter()
+        .find(|t| t.get("id").and_then(|v| v.as_str()) == Some("task-leaked-err"))
+        .expect("task-leaked-err should exist");
+
+    let err_msg = task_err.get("error").and_then(|v| v.as_str()).unwrap();
+    assert!(
+        !err_msg.contains(secret_key),
+        "Secret must be masked in diagnostic bundle"
+    );
+    assert_eq!(
+        task_err.get("failureReason").and_then(|v| v.as_str()),
+        Some("credentials")
+    );
+
+    // 验证整个诊断包字符串绝不含有真实密钥
+    let bundle_json = serde_json::to_string(&bundle).unwrap();
+    assert!(!bundle_json.contains(secret_key));
+    // 验证不包含用户 prompt 对话正文
+    assert!(!bundle_json.contains("sensitive prompt"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}

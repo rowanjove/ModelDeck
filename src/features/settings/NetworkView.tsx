@@ -199,8 +199,35 @@ export function NetworkView() {
             disabled={testMutation.isPending}
             onClick={handleTest}
           >
-            {testMutation.isPending ? "正在测试连通性…" : "测试代理连接 "}
+            {testMutation.isPending ? "正在测试连通性…" : "测试代理连接"}
           </button>
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: "16px",
+          padding: "14px 16px",
+          background: "var(--surface-2, rgba(255, 255, 255, 0.03))",
+          border: "1px solid var(--line)",
+          borderRadius: "8px",
+          fontSize: "12.5px",
+          color: "var(--muted)",
+          lineHeight: "1.6",
+        }}
+      >
+        <div
+          style={{ fontWeight: 600, color: "var(--fg)", marginBottom: "6px" }}
+        >
+          代理切换生效边界说明 (Proxy Switching Lifecycle)
+        </div>
+        <div>
+          • <strong>新请求即时生效</strong>
+          ：保存设置后，应用全局网络客户端立即热更新，所有随后发起的新任务、端点校验与元数据请求将立刻使用新代理模式。
+        </div>
+        <div>
+          • <strong>进行中任务不中断</strong>
+          ：当前正在传输的流式对话、长轮询任务或媒体下载由现有连接持有，不保证即时强制切换通道。建议等待其完成或主动取消后重试。
         </div>
       </div>
     </div>

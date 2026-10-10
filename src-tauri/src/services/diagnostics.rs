@@ -12,6 +12,8 @@ pub struct DiagnosticItem {
     pub name: String,
     pub status: String, // "ok" | "warn" | "error"
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>, // "network" | "credentials" | "model" | "disk" | "webview2"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,9 +36,80 @@ pub struct DiagnosticBundle {
     pub recent_logs: Vec<crate::logging::LogEntry>,
 }
 
+pub fn classify_failure_reason(error_msg: &str) -> &'static str {
+    let lower = error_msg.to_lowercase();
+    if lower.contains("401")
+        || lower.contains("unauthorized")
+        || lower.contains("api key")
+        || lower.contains("api_key")
+        || lower.contains("credential")
+        || lower.contains("forbidden")
+        || lower.contains("authentication")
+        || lower.contains("token")
+        || lower.contains("bearer")
+    {
+        "credentials"
+    } else if lower.contains("404")
+        || lower.contains("model")
+        || lower.contains("not found")
+        || lower.contains("does not exist")
+        || lower.contains("unsupported")
+    {
+        "model"
+    } else if lower.contains("disk")
+        || lower.contains("space")
+        || lower.contains("full")
+        || lower.contains("permission denied")
+        || lower.contains("read-only")
+    {
+        "disk"
+    } else if lower.contains("webview2") || lower.contains("edge") {
+        "webview2"
+    } else if lower.contains("timeout")
+        || lower.contains("connect")
+        || lower.contains("dns")
+        || lower.contains("proxy")
+        || lower.contains("network")
+        || lower.contains("reset")
+        || lower.contains("eof")
+    {
+        "network"
+    } else {
+        "unknown"
+    }
+}
+
+async fn probe_connectivity(
+    settings: &crate::services::network::ProxySettings,
+) -> Result<u64, String> {
+    let client = crate::services::network::build_client_with_proxy(settings)
+        .map_err(|e| format!("构建代理客户端失败: {e}"))?;
+    let start = std::time::Instant::now();
+    let resp = client
+        .get("https://1.1.1.1")
+        .timeout(std::time::Duration::from_millis(2000))
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "公网连接超时 (2s)".to_string()
+            } else if e.is_connect() {
+                "目标地址不可达或代理未启动".to_string()
+            } else {
+                e.to_string()
+            }
+        })?;
+    if resp.status().is_success() || resp.status().as_u16() < 500 {
+        Ok(start.elapsed().as_millis() as u64)
+    } else {
+        Err(format!("端点响应 HTTP {}", resp.status().as_u16()))
+    }
+}
+
 pub async fn run_diagnostics(
     data_dir: &Path,
     pool: &SqlitePool,
+    secrets: Option<&dyn crate::credentials::SecretStore>,
 ) -> Result<SystemDiagnosticsReport, AppError> {
     let mut items = Vec::new();
 
@@ -58,6 +131,11 @@ pub async fn run_diagnostics(
                 } else {
                     lines.join("; ")
                 },
+                failure_reason: if is_ok {
+                    None
+                } else {
+                    Some("disk".to_string())
+                },
             });
         }
         Err(e) => {
@@ -66,6 +144,7 @@ pub async fn run_diagnostics(
                 name: "SQLite Integrity".to_string(),
                 status: "error".to_string(),
                 detail: e.message,
+                failure_reason: Some("disk".to_string()),
             });
         }
     }
@@ -81,6 +160,7 @@ pub async fn run_diagnostics(
         name: "Schema Version".to_string(),
         status: "ok".to_string(),
         detail: format!("当前迁移版本: {}", max_migration.unwrap_or(0)),
+        failure_reason: None,
     });
 
     // 3. 磁盘空间检查
@@ -88,18 +168,19 @@ pub async fn run_diagnostics(
     {
         if let Some(free_bytes) = crate::storage_util::platform_free_space(data_dir) {
             let free_mb = free_bytes / (1024 * 1024);
-            let status = if free_mb > 1000 {
-                "ok"
+            let (status, reason) = if free_mb > 1000 {
+                ("ok", None)
             } else if free_mb > 500 {
-                "warn"
+                ("warn", Some("disk".to_string()))
             } else {
-                "error"
+                ("error", Some("disk".to_string()))
             };
             items.push(DiagnosticItem {
                 category: "存储".to_string(),
                 name: "磁盘可用空间".to_string(),
                 status: status.to_string(),
                 detail: format!("剩余可用空间: {} MB (底线安全阈值: 500 MB)", free_mb),
+                failure_reason: reason,
             });
         }
     }
@@ -117,35 +198,149 @@ pub async fn run_diagnostics(
             "error".to_string()
         },
         detail: format!("路径: {}", data_dir.display()),
+        failure_reason: if rw_ok {
+            None
+        } else {
+            Some("disk".to_string())
+        },
     });
 
-    // 5. Provider 与模型统计
-    let prov_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM providers WHERE enabled = 1")
-        .fetch_one(pool)
+    // 5. WebView2 运行时检查
+    let webview2_installed = crate::windows_util::is_webview2_installed();
+    items.push(DiagnosticItem {
+        category: "系统与环境".to_string(),
+        name: "WebView2 Runtime".to_string(),
+        status: if webview2_installed {
+            "ok".to_string()
+        } else {
+            "error".to_string()
+        },
+        detail: if webview2_installed {
+            "Microsoft Edge WebView2 运行时已安装且就绪".to_string()
+        } else {
+            "未检测到 WebView2 运行时，可能导致界面无法渲染。请从微软官方下载安装".to_string()
+        },
+        failure_reason: if webview2_installed {
+            None
+        } else {
+            Some("webview2".to_string())
+        },
+    });
+
+    // 6. 网络与代理通道自检
+    let proxy_settings = crate::services::network::get_proxy_settings(pool)
         .await
-        .unwrap_or(0);
+        .unwrap_or_default();
+    let mode_desc = match proxy_settings.mode.as_str() {
+        "system" => "系统代理 (跟随系统)".to_string(),
+        "none" => "直连 (已禁用代理)".to_string(),
+        "http" => format!(
+            "HTTP 代理 ({})",
+            proxy_settings.http_proxy.as_deref().unwrap_or("未配置")
+        ),
+        "socks5" => format!(
+            "SOCKS5 代理 ({})",
+            proxy_settings.socks5_proxy.as_deref().unwrap_or("未配置")
+        ),
+        other => other.to_string(),
+    };
+
+    let probe_res = probe_connectivity(&proxy_settings).await;
+    match probe_res {
+        Ok(latency_ms) => {
+            items.push(DiagnosticItem {
+                category: "网络与代理".to_string(),
+                name: "网络与代理连通性".to_string(),
+                status: "ok".to_string(),
+                detail: format!(
+                    "当前模式: {}；公网端点连通正常 (探测延迟: {} ms)",
+                    mode_desc, latency_ms
+                ),
+                failure_reason: None,
+            });
+        }
+        Err(err) => {
+            items.push(DiagnosticItem {
+                category: "网络与代理".to_string(),
+                name: "网络与代理连通性".to_string(),
+                status: "warn".to_string(),
+                detail: format!(
+                    "当前模式: {}；外网连通探测未通: {} (内网离线或仅使用本地模型时可忽略)",
+                    mode_desc, err
+                ),
+                failure_reason: Some("network".to_string()),
+            });
+        }
+    }
+
+    // 7. 关键 Provider 连通性与凭据有效性自检
+    let prov_rows = sqlx::query(
+        "SELECT id, name, type, base_url, credential_id, enabled FROM providers WHERE enabled = 1",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
     let model_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM models WHERE enabled = 1")
         .fetch_one(pool)
         .await
         .unwrap_or(0);
-    items.push(DiagnosticItem {
-        category: "配置".to_string(),
-        name: "活跃 Provider 与模型".to_string(),
-        status: if prov_count > 0 {
-            "ok".to_string()
-        } else {
-            "warn".to_string()
-        },
-        detail: format!(
-            "启用 Provider: {} 个，启用模型: {} 个",
-            prov_count, model_count
-        ),
-    });
 
-    // 6. 存储孤儿与碎片情况
+    if prov_rows.is_empty() {
+        items.push(DiagnosticItem {
+            category: "模型与凭据".to_string(),
+            name: "关键 Provider 凭据".to_string(),
+            status: "warn".to_string(),
+            detail: "当前未启用任何 AI Provider，无法发起任务生成".to_string(),
+            failure_reason: Some("model".to_string()),
+        });
+    } else {
+        let mut missing_creds = Vec::new();
+        for row in &prov_rows {
+            let p_name: String = row.try_get("name").unwrap_or_default();
+            let p_type: String = row.try_get("type").unwrap_or_default();
+            let cred_id: Option<String> = row.try_get("credential_id").unwrap_or(None);
+
+            if cred_id.is_none() || cred_id.as_deref().unwrap_or("").trim().is_empty() {
+                missing_creds.push(format!("{p_name}({p_type}) 未配置凭据"));
+            } else if let Some(store) = secrets {
+                let cid = cred_id.unwrap();
+                if let Ok(Some(secret)) = store.get(&cid) {
+                    if secret.expose().trim().is_empty() {
+                        missing_creds.push(format!("{p_name}({p_type}) 密钥为空"));
+                    }
+                } else {
+                    missing_creds.push(format!("{p_name}({p_type}) 凭据丢失"));
+                }
+            }
+        }
+
+        if !missing_creds.is_empty() {
+            items.push(DiagnosticItem {
+                category: "模型与凭据".to_string(),
+                name: "关键 Provider 凭据".to_string(),
+                status: "error".to_string(),
+                detail: format!("发现凭据异常: {}", missing_creds.join("; ")),
+                failure_reason: Some("credentials".to_string()),
+            });
+        } else {
+            items.push(DiagnosticItem {
+                category: "模型与凭据".to_string(),
+                name: "关键 Provider 凭据".to_string(),
+                status: "ok".to_string(),
+                detail: format!(
+                    "已启用 {} 个 Provider，凭据配置完整；启用模型 {} 个",
+                    prov_rows.len(),
+                    model_count
+                ),
+                failure_reason: None,
+            });
+        }
+    }
+
+    // 8. 存储孤儿与碎片情况
     let storage_report =
         crate::services::storage_maintenance::inspect_storage(data_dir, pool).await?;
-    let _has_temp = !storage_report.temp_files.is_empty();
     let has_missing = !storage_report.missing_files.is_empty();
     let status = if has_missing { "warn" } else { "ok" };
     items.push(DiagnosticItem {
@@ -160,6 +355,11 @@ pub async fn run_diagnostics(
             storage_report.temp_files.len(),
             storage_report.missing_files.len()
         ),
+        failure_reason: if has_missing {
+            Some("disk".to_string())
+        } else {
+            None
+        },
     });
 
     Ok(SystemDiagnosticsReport {
@@ -177,7 +377,7 @@ pub async fn export_diagnostic_bundle(
     pool: &SqlitePool,
     secrets: Option<&dyn crate::credentials::SecretStore>,
 ) -> Result<DiagnosticBundle, AppError> {
-    let report = run_diagnostics(data_dir, pool).await?;
+    let report = run_diagnostics(data_dir, pool, secrets).await?;
     let storage = crate::services::storage_maintenance::inspect_storage(data_dir, pool).await?;
 
     // 收集所有已配置 Provider 的真实密钥值（用于精准内容脱敏，绝不让真实密钥泄漏至错误信息或日志中）
@@ -217,7 +417,7 @@ pub async fn export_diagnostic_bundle(
         }));
     }
 
-    // 最近失败任务的错误信息（不包含 prompt）
+    // 最近失败任务的错误信息（不包含 prompt，增加 failureReason 归因）
     let error_rows = sqlx::query(
         "SELECT id, modality, provider_id, model_id, status, error, created_at, completed_at
          FROM generation_tasks
@@ -234,8 +434,14 @@ pub async fn export_diagnostic_bundle(
         let raw_err = row
             .try_get::<Option<String>, _>("error")
             .unwrap_or_default();
-        let sanitized_err =
-            raw_err.map(|e| crate::redact::mask_with_known_secrets(&e, &secret_refs));
+        let sanitized_err = raw_err
+            .as_deref()
+            .map(|e| crate::redact::mask_with_known_secrets(e, &secret_refs));
+        let failure_reason = raw_err
+            .as_deref()
+            .map(classify_failure_reason)
+            .unwrap_or("unknown");
+
         recent_task_errors.push(serde_json::json!({
             "id": row.try_get::<String, _>("id").unwrap_or_default(),
             "modality": row.try_get::<String, _>("modality").unwrap_or_default(),
@@ -243,6 +449,7 @@ pub async fn export_diagnostic_bundle(
             "modelId": row.try_get::<String, _>("model_id").unwrap_or_default(),
             "status": row.try_get::<String, _>("status").unwrap_or_default(),
             "error": sanitized_err,
+            "failureReason": failure_reason,
             "createdAt": row.try_get::<String, _>("created_at").unwrap_or_default(),
         }));
     }
@@ -263,4 +470,91 @@ pub async fn export_diagnostic_bundle(
         recent_task_errors,
         recent_logs,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_failure_reason() {
+        assert_eq!(
+            classify_failure_reason("HTTP 401 Unauthorized: Invalid API key"),
+            "credentials"
+        );
+        assert_eq!(
+            classify_failure_reason("Bearer token expired"),
+            "credentials"
+        );
+        assert_eq!(
+            classify_failure_reason("Model gpt-5 not found or does not exist"),
+            "model"
+        );
+        assert_eq!(
+            classify_failure_reason("Connection reset by peer: timeout after 10s"),
+            "network"
+        );
+        assert_eq!(
+            classify_failure_reason("DNS probe failed: proxy connection refused"),
+            "network"
+        );
+        assert_eq!(
+            classify_failure_reason("IO Error: No space left on device disk full"),
+            "disk"
+        );
+        assert_eq!(
+            classify_failure_reason("Microsoft Edge WebView2 runtime failed to initialize"),
+            "webview2"
+        );
+        assert_eq!(
+            classify_failure_reason("Generic internal calculation syntax"),
+            "unknown"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_diagnostics_and_bundle_export() {
+        let temp_dir = std::env::temp_dir().join(format!("ai-diag-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db_path = temp_dir.join("test.db");
+        let pool = crate::db::open(&db_path).await.unwrap();
+        crate::db::migrate(&pool).await.unwrap();
+
+        // 插入测试 Provider 和任务错误
+        sqlx::query(
+            "INSERT INTO providers (id, name, type, base_url, credential_id, headers_json, timeout_ms, enabled, created_at, updated_at)
+             VALUES ('prov-1', 'Test Provider', 'openai', 'https://api.openai.com/v1', 'cred-1', '{}', 30000, 1, '2026-10-10T00:00:00Z', '2026-10-10T00:00:00Z')"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, input_json, parameters_json, error, created_at)
+             VALUES ('task-err-1', 'text', 'prov-1', 'gpt-4o', 'failed', '{}', '{}', 'Error 401: sk-secretkey123456 is invalid', '2026-10-10T00:00:00Z')"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let report = run_diagnostics(&temp_dir, &pool, None).await.unwrap();
+        assert!(!report.items.is_empty());
+        assert!(report.items.iter().any(|i| i.name == "SQLite Integrity"));
+        assert!(report.items.iter().any(|i| i.name == "WebView2 Runtime"));
+        assert!(report.items.iter().any(|i| i.name == "网络与代理连通性"));
+        assert!(report.items.iter().any(|i| i.name == "关键 Provider 凭据"));
+
+        let bundle = export_diagnostic_bundle(&temp_dir, &pool, None)
+            .await
+            .unwrap();
+        assert_eq!(bundle.sanitized_providers.len(), 1);
+        assert_eq!(bundle.recent_task_errors.len(), 1);
+        let first_err = &bundle.recent_task_errors[0];
+        assert_eq!(
+            first_err.get("failureReason").unwrap().as_str().unwrap(),
+            "credentials"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

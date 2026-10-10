@@ -12,8 +12,14 @@ use crate::domain::{
 };
 use crate::error::AppError;
 
-const DEFAULT_REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/ai-workbench/registry/main/model-registry.json";
+pub const DEFAULT_REGISTRY_URL: &str =
+    "https://raw.githubusercontent.com/rowanjove/ModelDeck/main/registry/model-registry.json";
+
+pub const MAX_REGISTRY_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_PROVIDERS_COUNT: usize = 100;
+pub const MAX_MODELS_COUNT: usize = 1000;
+pub const MAX_PARAMETERS_PER_MODEL: usize = 100;
+pub const MAX_CONSTRAINTS_PER_MODEL: usize = 100;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1099,16 +1105,115 @@ pub fn rollback_registry(data_dir: &Path) -> Result<RegistryCatalog, AppError> {
     Ok(restored)
 }
 
-pub async fn check_update(
-    data_dir: &Path,
+pub fn validate_catalog(catalog: &RegistryCatalog) -> Result<(), AppError> {
+    if catalog.version.trim().is_empty() || catalog.version.len() > 64 {
+        return Err(AppError::validation(
+            "Registry 版本号不能为空且长度不得超过 64 字符",
+        ));
+    }
+    if catalog.providers.is_empty() {
+        return Err(AppError::validation(
+            "Registry 至少必须包含一个 Provider 模板",
+        ));
+    }
+    if catalog.providers.len() > MAX_PROVIDERS_COUNT {
+        return Err(AppError::validation(format!(
+            "Registry Provider 数量超出上限 ({} 项，最大 {})",
+            catalog.providers.len(),
+            MAX_PROVIDERS_COUNT
+        )));
+    }
+    for p in &catalog.providers {
+        if p.id.trim().is_empty() || p.id.len() > 64 {
+            return Err(AppError::validation(
+                "Provider ID 不能为空且长度不得超过 64 字符",
+            ));
+        }
+        if p.name.trim().is_empty() || p.name.len() > 128 {
+            return Err(AppError::validation(
+                "Provider 名称不能为空且长度不得超过 128 字符",
+            ));
+        }
+    }
+    if catalog.models.is_empty() {
+        return Err(AppError::validation("Registry 至少必须包含一个 Model 模板"));
+    }
+    if catalog.models.len() > MAX_MODELS_COUNT {
+        return Err(AppError::validation(format!(
+            "Registry Model 数量超出上限 ({} 项，最大 {})",
+            catalog.models.len(),
+            MAX_MODELS_COUNT
+        )));
+    }
+    for m in &catalog.models {
+        if m.id.trim().is_empty() || m.id.len() > 64 {
+            return Err(AppError::validation(
+                "模型模板 ID 不能为空且长度不得超过 64 字符",
+            ));
+        }
+        if m.model_id.trim().is_empty() || m.model_id.len() > 128 {
+            return Err(AppError::validation(
+                "模型 ID 不能为空且长度不得超过 128 字符",
+            ));
+        }
+        if m.name.trim().is_empty() || m.name.len() > 128 {
+            return Err(AppError::validation(
+                "模型名称不能为空且长度不得超过 128 字符",
+            ));
+        }
+        if m.parameters.len() > MAX_PARAMETERS_PER_MODEL {
+            return Err(AppError::validation(format!(
+                "模型「{}」的参数数量超出限制 (最大 {})",
+                m.name, MAX_PARAMETERS_PER_MODEL
+            )));
+        }
+        for param in &m.parameters {
+            if param.key.trim().is_empty() || param.key.len() > 64 {
+                return Err(AppError::validation(format!(
+                    "模型「{}」存在非法的参数 key",
+                    m.name
+                )));
+            }
+        }
+        if m.constraints.len() > MAX_CONSTRAINTS_PER_MODEL {
+            return Err(AppError::validation(format!(
+                "模型「{}」的联动约束数量超出限制 (最大 {})",
+                m.name, MAX_CONSTRAINTS_PER_MODEL
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn is_newer_version(remote: &str, current: &str) -> bool {
+    let parse_parts = |v: &str| -> Vec<u64> {
+        v.split(|c: char| c == '.' || c == '-' || c == '_')
+            .filter_map(|s| s.parse::<u64>().ok())
+            .collect()
+    };
+    let remote_parts = parse_parts(remote);
+    let current_parts = parse_parts(current);
+
+    if !remote_parts.is_empty() && !current_parts.is_empty() {
+        for (r, c) in remote_parts.iter().zip(current_parts.iter()) {
+            if r > c {
+                return true;
+            }
+            if r < c {
+                return false;
+            }
+        }
+        return remote_parts.len() > current_parts.len();
+    }
+
+    remote.trim() > current.trim()
+}
+
+async fn fetch_and_validate_catalog(
     http: &Client,
-    custom_url: Option<String>,
-) -> Result<RegistryUpdateCheck, AppError> {
-    let current = get_catalog(data_dir);
-    let target_url = custom_url
-        .as_deref()
-        .or(current.source_url.as_deref())
-        .unwrap_or(DEFAULT_REGISTRY_URL);
+    target_url: &str,
+) -> Result<RegistryCatalog, AppError> {
+    use futures_util::StreamExt;
 
     let res = http.get(target_url).send().await.map_err(|err| {
         AppError::provider(
@@ -1120,24 +1225,84 @@ pub async fn check_update(
         )
     })?;
 
-    if !res.status().is_success() {
+    let status = res.status();
+    if !status.is_success() {
+        let is_default = target_url == DEFAULT_REGISTRY_URL;
+        let msg = if is_default && status.as_u16() == 404 {
+            "官方默认 Registry 在线更新源暂未部署，当前已完整加载内置模型目录。如需更新，请在上方配置自定义 Registry 源。".to_string()
+        } else {
+            format!("Registry 响应状态异常 (HTTP {})", status.as_u16())
+        };
         return Err(AppError::provider(
-            format!("Registry 更新地址响应状态异常 {}", res.status()),
-            res.status().as_u16(),
+            msg,
+            status.as_u16(),
             "Registry",
             None,
             None,
         ));
     }
 
-    let remote: RegistryCatalog = res
-        .json()
-        .await
-        .map_err(|err| AppError::validation(format!("解析远程 Registry JSON 失败: {err}")))?;
+    if let Some(len) = res.content_length() {
+        if len > MAX_REGISTRY_BYTES as u64 {
+            return Err(AppError::validation(format!(
+                "远程 Registry 文件大小超出限制 ({} 字节，最大允许 {} 字节)",
+                len, MAX_REGISTRY_BYTES
+            )));
+        }
+    }
 
-    let has_update = current.version != remote.version;
+    let mut body_bytes = Vec::new();
+    let mut stream = res.bytes_stream();
+    while let Some(chunk_res) = stream.next().await {
+        let chunk = chunk_res.map_err(|err| {
+            AppError::provider(
+                format!("读取远程 Registry 数据流中断: {err}"),
+                502,
+                "Registry",
+                None,
+                None,
+            )
+        })?;
+        if body_bytes.len() + chunk.len() > MAX_REGISTRY_BYTES {
+            return Err(AppError::validation(format!(
+                "远程 Registry 响应内容超过大小上限 (最大 {} 字节)",
+                MAX_REGISTRY_BYTES
+            )));
+        }
+        body_bytes.extend_from_slice(&chunk);
+    }
+
+    let catalog: RegistryCatalog = serde_json::from_slice(&body_bytes).map_err(|err| {
+        AppError::validation(format!(
+            "解析远程 Registry JSON 失败 (格式或字段不兼容): {err}"
+        ))
+    })?;
+
+    validate_catalog(&catalog)?;
+
+    Ok(catalog)
+}
+
+pub async fn check_update(
+    data_dir: &Path,
+    http: &Client,
+    custom_url: Option<String>,
+) -> Result<RegistryUpdateCheck, AppError> {
+    let current = get_catalog(data_dir);
+    let target_url = custom_url
+        .as_deref()
+        .or(current.source_url.as_deref())
+        .unwrap_or(DEFAULT_REGISTRY_URL);
+
+    let remote = fetch_and_validate_catalog(http, target_url).await?;
+
+    let has_update = is_newer_version(&remote.version, &current.version);
     let release_notes = if has_update {
-        Some(format!("包含 {} 个预设模型", remote.models.len()))
+        Some(format!(
+            "发现新版本 {} (包含 {} 个预设模型)",
+            remote.version,
+            remote.models.len()
+        ))
     } else {
         None
     };
@@ -1163,30 +1328,14 @@ pub async fn apply_update(
         .or(current.source_url.as_deref())
         .unwrap_or(DEFAULT_REGISTRY_URL);
 
-    let res = http.get(target_url).send().await.map_err(|err| {
-        AppError::provider(
-            format!("连接远程 Registry 失败: {err}"),
-            502,
-            "Registry",
-            None,
-            None,
-        )
-    })?;
+    let mut remote = fetch_and_validate_catalog(http, target_url).await?;
 
-    if !res.status().is_success() {
-        return Err(AppError::provider(
-            format!("Registry 更新地址响应状态异常 {}", res.status()),
-            res.status().as_u16(),
-            "Registry",
-            None,
-            None,
-        ));
+    if !is_newer_version(&remote.version, &current.version) && remote.version != current.version {
+        return Err(AppError::validation(format!(
+            "远端版本「{}」低于当前本地版本「{}」，已拒绝覆盖",
+            remote.version, current.version
+        )));
     }
-
-    let mut remote: RegistryCatalog = res
-        .json()
-        .await
-        .map_err(|err| AppError::validation(format!("解析远程 Registry JSON 失败: {err}")))?;
 
     remote.source_url = Some(target_url.to_string());
 
@@ -1209,8 +1358,7 @@ pub async fn apply_update(
         serde_json::to_vec_pretty(&default_catalog())
             .map_err(|e| AppError::validation(format!("序列化 Registry 默认备份失败: {e}")))?
     };
-    // A successful remote update must always have a verified rollback copy.
-    // Never replace the current catalog after a failed backup write.
+
     crate::storage_util::atomic_write(&backup_file, &backup_bytes)
         .map_err(|e| AppError::validation(format!("写入 Registry 备份失败: {e}")))?;
     let written_backup = std::fs::read(&backup_file)
@@ -1285,4 +1433,254 @@ pub async fn import_model_from_registry(
     };
 
     crate::services::models::create(pool, input).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_test_dir() -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("modeldeck-registry-test-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn test_default_catalog_validity_and_export() {
+        let cat = default_catalog();
+        assert!(validate_catalog(&cat).is_ok());
+        assert!(!cat.providers.is_empty());
+        assert!(!cat.models.is_empty());
+
+        // 尝试导出同步到仓库 registry/model-registry.json
+        let repo_registry_file = Path::new("../registry/model-registry.json");
+        if let Some(parent) = repo_registry_file.parent() {
+            if parent.exists() {
+                if let Ok(bytes) = serde_json::to_vec_pretty(&cat) {
+                    let _ = std::fs::write(repo_registry_file, bytes);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_version_comparison() {
+        assert!(is_newer_version("2026.11.0", "2026.10.1"));
+        assert!(is_newer_version("2026.10.2", "2026.10.1"));
+        assert!(!is_newer_version("2026.10.1", "2026.10.1"));
+        assert!(!is_newer_version("2025.12.31", "2026.10.1"));
+        assert!(is_newer_version("2.0.0", "1.9.9"));
+        assert!(!is_newer_version("1.0.0", "1.0.1"));
+        assert!(is_newer_version("1.0.0.1", "1.0.0"));
+        assert!(!is_newer_version("1.0.0", "1.0.0.1"));
+    }
+
+    #[test]
+    fn test_catalog_validation_rules() {
+        let mut cat = default_catalog();
+        cat.version = "".to_string();
+        assert!(validate_catalog(&cat).is_err());
+
+        let mut cat = default_catalog();
+        cat.providers.clear();
+        assert!(validate_catalog(&cat).is_err());
+
+        let mut cat = default_catalog();
+        cat.models.clear();
+        assert!(validate_catalog(&cat).is_err());
+
+        let mut cat = default_catalog();
+        cat.models[0].parameters = (0..101)
+            .map(|i| ParameterDefinition {
+                key: format!("param_{i}"),
+                label: format!("Param {i}"),
+                kind: ParameterType::Text,
+                default: None,
+                min: None,
+                max: None,
+                step: None,
+                options: None,
+                required: None,
+                advanced: None,
+                group: None,
+            })
+            .collect();
+        assert!(validate_catalog(&cat).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_check_and_apply_update_wiremock_success() {
+        let server = MockServer::start().await;
+        let mut remote_cat = default_catalog();
+        remote_cat.version = "2026.11.0".to_string();
+        remote_cat.models.push(RegistryModelTemplate {
+            id: "test-new-model".to_string(),
+            name: "Test New Model".to_string(),
+            provider_type: ProviderType::Openai,
+            model_id: "test-new".to_string(),
+            modality: Modality::Text,
+            capabilities: json!({ "streaming": true }),
+            parameters: vec![],
+            constraints: vec![],
+            transport: None,
+            recommended_defaults: None,
+            description: "A newly added model".to_string(),
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/registry.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&remote_cat))
+            .mount(&server)
+            .await;
+
+        let test_dir = make_test_dir();
+        let http = Client::new();
+        let custom_url = Some(format!("{}/registry.json", server.uri()));
+
+        let check = check_update(&test_dir, &http, custom_url.clone())
+            .await
+            .unwrap();
+        assert!(check.has_update);
+        assert_eq!(check.latest_version, "2026.11.0");
+
+        let updated = apply_update(&test_dir, &http, custom_url).await.unwrap();
+        assert_eq!(updated.version, "2026.11.0");
+        assert!(updated.can_rollback);
+        assert_eq!(updated.backup_version, Some("2026.10.1".to_string()));
+
+        let cached = get_catalog(&test_dir);
+        assert_eq!(cached.version, "2026.11.0");
+        assert!(cached.can_rollback);
+
+        let restored = rollback_registry(&test_dir).unwrap();
+        assert_eq!(restored.version, "2026.10.1");
+        assert!(!restored.can_rollback);
+
+        let _ = std::fs::remove_dir_all(test_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_http_404_preserves_local_catalog() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/404.json"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let test_dir = make_test_dir();
+        let http = Client::new();
+        let custom_url = Some(format!("{}/404.json", server.uri()));
+
+        let err = check_update(&test_dir, &http, custom_url.clone())
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("404"));
+
+        let apply_err = apply_update(&test_dir, &http, custom_url)
+            .await
+            .unwrap_err();
+        assert!(apply_err.message.contains("404"));
+
+        let cat = get_catalog(&test_dir);
+        assert_eq!(cat.version, "2026.10.1");
+
+        let _ = std::fs::remove_dir_all(test_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_malformed_json_preserves_local() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/bad.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{\"version\": 12345"))
+            .mount(&server)
+            .await;
+
+        let test_dir = make_test_dir();
+        let http = Client::new();
+        let custom_url = Some(format!("{}/bad.json", server.uri()));
+
+        let err = check_update(&test_dir, &http, custom_url)
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("JSON"));
+
+        let cat = get_catalog(&test_dir);
+        assert_eq!(cat.version, "2026.10.1");
+
+        let _ = std::fs::remove_dir_all(test_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_oversized_payload_rejected() {
+        let server = MockServer::start().await;
+        let oversized_data = "x".repeat(MAX_REGISTRY_BYTES + 100);
+        Mock::given(method("GET"))
+            .and(path("/huge.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(oversized_data))
+            .mount(&server)
+            .await;
+
+        let test_dir = make_test_dir();
+        let http = Client::new();
+        let custom_url = Some(format!("{}/huge.json", server.uri()));
+
+        let err = check_update(&test_dir, &http, custom_url)
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("超过大小上限") || err.message.contains("超出限制"));
+
+        let cat = get_catalog(&test_dir);
+        assert_eq!(cat.version, "2026.10.1");
+
+        let _ = std::fs::remove_dir_all(test_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_older_version_rejected() {
+        let server = MockServer::start().await;
+        let mut old_cat = default_catalog();
+        old_cat.version = "2025.1.1".to_string();
+
+        Mock::given(method("GET"))
+            .and(path("/old.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&old_cat))
+            .mount(&server)
+            .await;
+
+        let test_dir = make_test_dir();
+        let http = Client::new();
+        let custom_url = Some(format!("{}/old.json", server.uri()));
+
+        let err = apply_update(&test_dir, &http, custom_url)
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("低于当前本地版本"));
+
+        let cat = get_catalog(&test_dir);
+        assert_eq!(cat.version, "2026.10.1");
+
+        let _ = std::fs::remove_dir_all(test_dir);
+    }
+
+    #[test]
+    fn test_offline_fallback_on_corrupt_or_missing_file() {
+        let test_dir = make_test_dir();
+        let cat = get_catalog(&test_dir);
+        assert_eq!(cat.version, "2026.10.1");
+
+        let reg_dir = test_dir.join("registry");
+        let _ = std::fs::create_dir_all(&reg_dir);
+        let cat_file = reg_dir.join("catalog.json");
+        std::fs::write(&cat_file, "{corrupted json content").unwrap();
+
+        let fallback_cat = get_catalog(&test_dir);
+        assert_eq!(fallback_cat.version, "2026.10.1");
+
+        let _ = std::fs::remove_dir_all(test_dir);
+    }
 }

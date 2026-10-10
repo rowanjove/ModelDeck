@@ -1,0 +1,1038 @@
+{
+  "version": "2026.10.1",
+  "updatedAt": "2026-10-01T00:00:00Z",
+  "sourceUrl": "https://raw.githubusercontent.com/rowanjove/ModelDeck/main/registry/model-registry.json",
+  "providers": [
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "providerType": "openai",
+      "defaultBaseUrl": "https://api.openai.com/v1",
+      "description": "OpenAI 官方云端接口（GPT / DALL-E / Whisper / TTS）"
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "providerType": "anthropic",
+      "defaultBaseUrl": "https://api.anthropic.com",
+      "description": "Claude 系列模型原生接口"
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini",
+      "providerType": "gemini",
+      "defaultBaseUrl": "https://generativelanguage.googleapis.com",
+      "description": "Google 官方 Gemini 系列多模态接口"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "providerType": "openai-compatible",
+      "defaultBaseUrl": "https://api.deepseek.com",
+      "description": "DeepSeek 官方 API（V3 / R1 推理）"
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama 本地服务",
+      "providerType": "ollama",
+      "defaultBaseUrl": "http://127.0.0.1:11434",
+      "description": "本地免部署模型运行环境"
+    },
+    {
+      "id": "comfyui",
+      "name": "ComfyUI 本地服务",
+      "providerType": "comfyui",
+      "defaultBaseUrl": "http://127.0.0.1:8188",
+      "description": "基于节点图的高性能生图与生视频本地引擎"
+    }
+  ],
+  "models": [
+    {
+      "id": "gpt-4o",
+      "name": "GPT-4o",
+      "providerType": "openai",
+      "modelId": "gpt-4o",
+      "modality": "text",
+      "capabilities": {
+        "streaming": true,
+        "tools": true,
+        "vision": true
+      },
+      "parameters": [
+        {
+          "key": "temperature",
+          "label": "采样温度",
+          "type": "range",
+          "default": 0.7,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05,
+          "group": "采样控制"
+        },
+        {
+          "key": "max_tokens",
+          "label": "最大生成长度",
+          "type": "number",
+          "default": 4096,
+          "min": 1.0,
+          "max": 16384.0,
+          "step": 64.0,
+          "group": "生成参数"
+        }
+      ],
+      "constraints": [],
+      "description": "OpenAI 旗舰全能多模态模型"
+    },
+    {
+      "id": "claude-3-7-sonnet",
+      "name": "Claude 3.7 Sonnet",
+      "providerType": "anthropic",
+      "modelId": "claude-3-7-sonnet-20250219",
+      "modality": "text",
+      "capabilities": {
+        "streaming": true,
+        "thinking": true,
+        "tools": true,
+        "vision": true
+      },
+      "parameters": [
+        {
+          "key": "temperature",
+          "label": "采样温度",
+          "type": "range",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.05,
+          "group": "采样控制"
+        },
+        {
+          "key": "max_tokens",
+          "label": "最大 Token 数",
+          "type": "number",
+          "default": 8192,
+          "min": 1.0,
+          "max": 64000.0,
+          "step": 128.0,
+          "group": "生成参数"
+        }
+      ],
+      "constraints": [],
+      "description": "Anthropic 强混合推理旗舰模型"
+    },
+    {
+      "id": "deepseek-r1",
+      "name": "DeepSeek R1",
+      "providerType": "openai-compatible",
+      "modelId": "deepseek-reasoner",
+      "modality": "text",
+      "capabilities": {
+        "streaming": true,
+        "thinking": true
+      },
+      "parameters": [
+        {
+          "key": "temperature",
+          "label": "采样温度",
+          "type": "range",
+          "default": 0.6,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05,
+          "group": "采样控制"
+        }
+      ],
+      "constraints": [],
+      "description": "深度思考与数学/代码推理旗舰模型"
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "name": "Gemini 2.5 Pro",
+      "providerType": "gemini",
+      "modelId": "gemini-2.5-pro",
+      "modality": "text",
+      "capabilities": {
+        "streaming": true,
+        "tools": true,
+        "vision": true
+      },
+      "parameters": [],
+      "constraints": [],
+      "description": "Google 百万级超长上下文多模态推理模型"
+    },
+    {
+      "id": "dall-e-3",
+      "name": "DALL-E 3",
+      "providerType": "openai",
+      "modelId": "dall-e-3",
+      "modality": "image",
+      "capabilities": {
+        "generate": true
+      },
+      "parameters": [
+        {
+          "key": "size",
+          "label": "分辨率",
+          "type": "select",
+          "default": "1024x1024",
+          "options": [
+            {
+              "label": "1024x1024 正方形",
+              "value": "1024x1024"
+            },
+            {
+              "label": "1024x1792 竖版",
+              "value": "1024x1792"
+            },
+            {
+              "label": "1792x1024 横版",
+              "value": "1792x1024"
+            }
+          ],
+          "required": true,
+          "group": "图像格式"
+        },
+        {
+          "key": "quality",
+          "label": "渲染质量",
+          "type": "select",
+          "default": "standard",
+          "options": [
+            {
+              "label": "标准 standard",
+              "value": "standard"
+            },
+            {
+              "label": "高清 hd",
+              "value": "hd"
+            }
+          ],
+          "group": "图像格式"
+        }
+      ],
+      "constraints": [],
+      "description": "OpenAI 官方高质量文生图模型"
+    },
+    {
+      "id": "flux-1-schnell",
+      "name": "FLUX.1 schnell",
+      "providerType": "comfyui",
+      "modelId": "flux1-schnell",
+      "modality": "image",
+      "capabilities": {
+        "edit": true,
+        "generate": true
+      },
+      "parameters": [
+        {
+          "key": "steps",
+          "label": "迭代步数",
+          "type": "range",
+          "default": 4,
+          "min": 1.0,
+          "max": 8.0,
+          "step": 1.0,
+          "required": true,
+          "group": "采样控制"
+        },
+        {
+          "key": "guidance_scale",
+          "label": "引导强度 (CFG)",
+          "type": "range",
+          "default": 3.5,
+          "min": 0.0,
+          "max": 10.0,
+          "step": 0.5,
+          "group": "采样控制"
+        },
+        {
+          "key": "enable_upscale",
+          "label": "开启高清修复",
+          "type": "boolean",
+          "default": false,
+          "group": "后处理"
+        },
+        {
+          "key": "upscale_factor",
+          "label": "放大倍数",
+          "type": "range",
+          "default": 2.0,
+          "min": 1.0,
+          "max": 4.0,
+          "step": 0.5,
+          "required": true,
+          "group": "后处理"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "requires",
+          "field": "enable_upscale",
+          "required_fields": ["upscale_factor"]
+        },
+        {
+          "type": "conditionalVisibility",
+          "field": "upscale_factor",
+          "depends_on": "enable_upscale",
+          "equals": true
+        }
+      ],
+      "description": "开源 SOTA 极速画质生图模型（支持 4 步极速出图）"
+    },
+    {
+      "id": "flux-1-dev-comfyui",
+      "name": "FLUX.1 Dev (Workflow)",
+      "providerType": "comfyui",
+      "modelId": "flux1-dev-workflow",
+      "modality": "image",
+      "capabilities": {
+        "edit": true,
+        "generate": true,
+        "variation": true
+      },
+      "parameters": [
+        {
+          "key": "steps",
+          "label": "迭代步数",
+          "type": "range",
+          "default": 25,
+          "min": 1.0,
+          "max": 50.0,
+          "step": 1.0,
+          "required": true,
+          "group": "采样控制"
+        },
+        {
+          "key": "guidance_scale",
+          "label": "引导强度 (CFG)",
+          "type": "range",
+          "default": 3.5,
+          "min": 1.0,
+          "max": 10.0,
+          "step": 0.5,
+          "group": "采样控制"
+        },
+        {
+          "key": "seed",
+          "label": "随机种子",
+          "type": "number",
+          "default": 42,
+          "min": 0.0,
+          "max": 9999999999.0,
+          "step": 1.0,
+          "group": "采样控制"
+        }
+      ],
+      "constraints": [],
+      "transport": {
+        "workflow": {
+          "10": {
+            "class_type": "VAELoader",
+            "inputs": {
+              "vae_name": "ae.safetensors"
+            }
+          },
+          "12": {
+            "class_type": "UNETLoader",
+            "inputs": {
+              "unet_name": "flux1-dev.safetensors"
+            }
+          },
+          "13": {
+            "class_type": "KSampler",
+            "inputs": {
+              "cfg": 3.5,
+              "denoise": 1.0,
+              "latent_image": ["27", 0],
+              "model": ["12", 0],
+              "positive": ["6", 0],
+              "sampler_name": "euler",
+              "scheduler": "simple",
+              "seed": 42,
+              "steps": 25
+            }
+          },
+          "27": {
+            "class_type": "EmptySD3LatentImage",
+            "inputs": {
+              "batch_size": 1,
+              "height": 1024,
+              "width": 1024
+            }
+          },
+          "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+              "text": "high quality photo"
+            }
+          },
+          "8": {
+            "class_type": "VAEDecode",
+            "inputs": {
+              "samples": ["13", 0],
+              "vae": ["10", 0]
+            }
+          },
+          "9": {
+            "class_type": "SaveImage",
+            "inputs": {
+              "filename_prefix": "FluxDev",
+              "images": ["8", 0]
+            }
+          }
+        },
+        "bindings": [
+          {
+            "key": "prompt",
+            "node": "6",
+            "input": "text"
+          },
+          {
+            "key": "seed",
+            "node": "13",
+            "input": "seed"
+          },
+          {
+            "key": "steps",
+            "node": "13",
+            "input": "steps"
+          },
+          {
+            "key": "guidance_scale",
+            "node": "13",
+            "input": "cfg"
+          }
+        ]
+      },
+      "description": "ComfyUI 官方 FLUX.1 Dev 旗舰工作流模板"
+    },
+    {
+      "id": "sdxl-base-comfyui",
+      "name": "SDXL 1.0 (Workflow)",
+      "providerType": "comfyui",
+      "modelId": "sdxl-base-workflow",
+      "modality": "image",
+      "capabilities": {
+        "edit": true,
+        "generate": true
+      },
+      "parameters": [
+        {
+          "key": "steps",
+          "label": "迭代步数",
+          "type": "range",
+          "default": 25,
+          "min": 10.0,
+          "max": 60.0,
+          "step": 1.0,
+          "required": true,
+          "group": "采样控制"
+        },
+        {
+          "key": "cfg",
+          "label": "提示词引导 (CFG)",
+          "type": "range",
+          "default": 7.0,
+          "min": 1.0,
+          "max": 15.0,
+          "step": 0.5,
+          "group": "采样控制"
+        },
+        {
+          "key": "seed",
+          "label": "随机种子",
+          "type": "number",
+          "default": 42,
+          "min": 0.0,
+          "max": 9999999999.0,
+          "step": 1.0,
+          "group": "采样控制"
+        }
+      ],
+      "constraints": [],
+      "transport": {
+        "workflow": {
+          "3": {
+            "class_type": "KSampler",
+            "inputs": {
+              "cfg": 7.0,
+              "denoise": 1.0,
+              "latent_image": ["5", 0],
+              "model": ["4", 0],
+              "negative": ["7", 0],
+              "positive": ["6", 0],
+              "sampler_name": "euler",
+              "scheduler": "normal",
+              "seed": 42,
+              "steps": 25
+            }
+          },
+          "4": {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": {
+              "ckpt_name": "sd_xl_base_1.0.safetensors"
+            }
+          },
+          "5": {
+            "class_type": "EmptyLatentImage",
+            "inputs": {
+              "batch_size": 1,
+              "height": 1024,
+              "width": 1024
+            }
+          },
+          "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+              "clip": ["4", 1],
+              "text": "masterpiece"
+            }
+          },
+          "7": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+              "clip": ["4", 1],
+              "text": "ugly, blurry"
+            }
+          },
+          "8": {
+            "class_type": "VAEDecode",
+            "inputs": {
+              "samples": ["3", 0],
+              "vae": ["4", 2]
+            }
+          },
+          "9": {
+            "class_type": "SaveImage",
+            "inputs": {
+              "filename_prefix": "SDXL",
+              "images": ["8", 0]
+            }
+          }
+        },
+        "bindings": [
+          {
+            "key": "prompt",
+            "node": "6",
+            "input": "text"
+          },
+          {
+            "key": "negativePrompt",
+            "node": "7",
+            "input": "text"
+          },
+          {
+            "key": "seed",
+            "node": "3",
+            "input": "seed"
+          },
+          {
+            "key": "steps",
+            "node": "3",
+            "input": "steps"
+          },
+          {
+            "key": "cfg",
+            "node": "3",
+            "input": "cfg"
+          }
+        ]
+      },
+      "description": "Stable Diffusion XL 1.0 经典基础生图工作流模板"
+    },
+    {
+      "id": "wan-2-1-i2v-comfyui",
+      "name": "Wan 2.1 I2V (Workflow)",
+      "providerType": "comfyui",
+      "modelId": "wan2.1-i2v-workflow",
+      "modality": "video",
+      "capabilities": {
+        "imageToVideo": true,
+        "textToVideo": true
+      },
+      "parameters": [
+        {
+          "key": "frames",
+          "label": "总帧数",
+          "type": "range",
+          "default": 81,
+          "min": 17.0,
+          "max": 121.0,
+          "step": 16.0,
+          "required": true,
+          "group": "视频规格"
+        },
+        {
+          "key": "fps",
+          "label": "帧率 (FPS)",
+          "type": "select",
+          "default": 16,
+          "options": [
+            {
+              "label": "16 帧/秒",
+              "value": 16
+            },
+            {
+              "label": "24 帧/秒",
+              "value": 24
+            }
+          ],
+          "group": "视频规格"
+        }
+      ],
+      "constraints": [],
+      "transport": {
+        "workflow": {
+          "10": {
+            "class_type": "LoadImage",
+            "inputs": {
+              "image": "first_frame.png"
+            }
+          },
+          "12": {
+            "class_type": "SaveAnimatedWEBP",
+            "inputs": {
+              "filename_prefix": "WanI2V",
+              "fps": 16,
+              "images": ["3", 0]
+            }
+          },
+          "3": {
+            "class_type": "KSampler",
+            "inputs": {
+              "cfg": 6.0,
+              "denoise": 1.0,
+              "latent_image": ["10", 0],
+              "model": ["4", 0],
+              "negative": ["7", 0],
+              "positive": ["6", 0],
+              "sampler_name": "euler",
+              "scheduler": "normal",
+              "seed": 42,
+              "steps": 30
+            }
+          },
+          "4": {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": {
+              "ckpt_name": "wan2.1_i2v_720p.safetensors"
+            }
+          },
+          "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+              "clip": ["4", 1],
+              "text": "cinematic scene"
+            }
+          },
+          "7": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+              "clip": ["4", 1],
+              "text": "static, watermark"
+            }
+          }
+        },
+        "bindings": [
+          {
+            "key": "prompt",
+            "node": "6",
+            "input": "text"
+          },
+          {
+            "key": "negativePrompt",
+            "node": "7",
+            "input": "text"
+          },
+          {
+            "key": "firstFrame",
+            "node": "10",
+            "input": "image"
+          },
+          {
+            "key": "seed",
+            "node": "3",
+            "input": "seed"
+          }
+        ]
+      },
+      "description": "Wan 2.1 图生视频 (Image-to-Video) ComfyUI 标准工作流模板"
+    },
+    {
+      "id": "hunyuan-video-comfyui",
+      "name": "Hunyuan Video (Workflow)",
+      "providerType": "comfyui",
+      "modelId": "hunyuan-video-workflow",
+      "modality": "video",
+      "capabilities": {
+        "textToVideo": true
+      },
+      "parameters": [
+        {
+          "key": "frames",
+          "label": "总帧数",
+          "type": "range",
+          "default": 65,
+          "min": 17.0,
+          "max": 129.0,
+          "step": 16.0,
+          "required": true,
+          "group": "视频规格"
+        }
+      ],
+      "constraints": [],
+      "transport": {
+        "workflow": {
+          "12": {
+            "class_type": "SaveAnimatedWEBP",
+            "inputs": {
+              "filename_prefix": "HunyuanVideo",
+              "fps": 24,
+              "images": ["3", 0]
+            }
+          },
+          "3": {
+            "class_type": "KSampler",
+            "inputs": {
+              "cfg": 6.0,
+              "denoise": 1.0,
+              "model": ["4", 0],
+              "positive": ["6", 0],
+              "sampler_name": "euler",
+              "scheduler": "normal",
+              "seed": 42,
+              "steps": 30
+            }
+          },
+          "4": {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": {
+              "ckpt_name": "hunyuan_video.safetensors"
+            }
+          },
+          "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+              "clip": ["4", 1],
+              "text": "high quality video"
+            }
+          }
+        },
+        "bindings": [
+          {
+            "key": "prompt",
+            "node": "6",
+            "input": "text"
+          },
+          {
+            "key": "seed",
+            "node": "3",
+            "input": "seed"
+          }
+        ]
+      },
+      "description": "腾讯混元开源视频大模型 (Hunyuan Video) ComfyUI 工作流模板"
+    },
+    {
+      "id": "wan-2.1",
+      "name": "Wan2.1",
+      "providerType": "comfyui",
+      "modelId": "wan2.1-t2v-14b",
+      "modality": "video",
+      "capabilities": {
+        "imageToVideo": true,
+        "textToVideo": true
+      },
+      "parameters": [
+        {
+          "key": "frames",
+          "label": "帧数",
+          "type": "range",
+          "default": 81,
+          "min": 17.0,
+          "max": 121.0,
+          "step": 16.0,
+          "required": true,
+          "group": "视频规格"
+        },
+        {
+          "key": "fps",
+          "label": "帧率 (FPS)",
+          "type": "select",
+          "default": 16,
+          "options": [
+            {
+              "label": "16 帧/秒",
+              "value": 16
+            },
+            {
+              "label": "24 帧/秒",
+              "value": 24
+            }
+          ],
+          "group": "视频规格"
+        }
+      ],
+      "constraints": [],
+      "description": "万象 Wan2.1 顶级开源视频生成大模型"
+    },
+    {
+      "id": "whisper-large-v3",
+      "name": "Whisper Large v3",
+      "providerType": "openai",
+      "modelId": "whisper-1",
+      "modality": "audio",
+      "capabilities": {
+        "speechToText": true
+      },
+      "parameters": [
+        {
+          "key": "language",
+          "label": "识别语言",
+          "type": "select",
+          "default": "zh",
+          "options": [
+            {
+              "label": "中文 (Chinese)",
+              "value": "zh"
+            },
+            {
+              "label": "英语 (English)",
+              "value": "en"
+            },
+            {
+              "label": "日语 (Japanese)",
+              "value": "ja"
+            },
+            {
+              "label": "韩语 (Korean)",
+              "value": "ko"
+            },
+            {
+              "label": "法语 (French)",
+              "value": "fr"
+            },
+            {
+              "label": "德语 (German)",
+              "value": "de"
+            },
+            {
+              "label": "西班牙语 (Spanish)",
+              "value": "es"
+            }
+          ],
+          "group": "识别设置"
+        },
+        {
+          "key": "timestamp",
+          "label": "输出分段时间戳",
+          "type": "boolean",
+          "default": true,
+          "group": "时间戳与格式"
+        },
+        {
+          "key": "word_timestamps",
+          "label": "词级时间戳 (Word-level)",
+          "type": "boolean",
+          "default": false,
+          "group": "时间戳与格式"
+        },
+        {
+          "key": "speaker",
+          "label": "说话人区分 (Diarization)",
+          "type": "boolean",
+          "default": false,
+          "group": "时间戳与格式"
+        }
+      ],
+      "constraints": [],
+      "description": "高精度语音转文本模型，支持时间戳、词级定位与字幕导出"
+    },
+    {
+      "id": "tts-1-hd",
+      "name": "OpenAI TTS-1 HD",
+      "providerType": "openai",
+      "modelId": "tts-1-hd",
+      "modality": "audio",
+      "capabilities": {
+        "textToSpeech": true
+      },
+      "parameters": [
+        {
+          "key": "voice",
+          "label": "预设音色",
+          "type": "select",
+          "default": "alloy",
+          "options": [
+            {
+              "label": "Alloy (中性沉稳)",
+              "value": "alloy"
+            },
+            {
+              "label": "Echo (温暖男声)",
+              "value": "echo"
+            },
+            {
+              "label": "Fable (英伦腔调)",
+              "value": "fable"
+            },
+            {
+              "label": "Onyx (深沉厚重)",
+              "value": "onyx"
+            },
+            {
+              "label": "Nova (年轻亲切)",
+              "value": "nova"
+            },
+            {
+              "label": "Shimmer (清亮女声)",
+              "value": "shimmer"
+            }
+          ],
+          "required": true,
+          "group": "音色选择"
+        },
+        {
+          "key": "speed",
+          "label": "语速倍率",
+          "type": "range",
+          "default": 1.0,
+          "min": 0.25,
+          "max": 4.0,
+          "step": 0.05,
+          "group": "音频参数"
+        },
+        {
+          "key": "emotion",
+          "label": "情感表现",
+          "type": "select",
+          "default": "neutral",
+          "options": [
+            {
+              "label": "自然平静 (Neutral)",
+              "value": "neutral"
+            },
+            {
+              "label": "愉悦开心 (Happy)",
+              "value": "happy"
+            },
+            {
+              "label": "温柔亲近 (Gentle)",
+              "value": "gentle"
+            },
+            {
+              "label": "严谨庄重 (Serious)",
+              "value": "serious"
+            },
+            {
+              "label": "激昂兴奋 (Excited)",
+              "value": "excited"
+            },
+            {
+              "label": "低落悲伤 (Sad)",
+              "value": "sad"
+            }
+          ],
+          "advanced": true,
+          "group": "音色表现"
+        },
+        {
+          "key": "style",
+          "label": "风格语境",
+          "type": "select",
+          "default": "narration",
+          "options": [
+            {
+              "label": "旁白解说 (Narration)",
+              "value": "narration"
+            },
+            {
+              "label": "日常会话 (Chat)",
+              "value": "chat"
+            },
+            {
+              "label": "新闻广播 (News)",
+              "value": "news"
+            },
+            {
+              "label": "有声读物 (Audiobook)",
+              "value": "audiobook"
+            },
+            {
+              "label": "影视配音 (Cinema)",
+              "value": "cinema"
+            }
+          ],
+          "advanced": true,
+          "group": "音色表现"
+        }
+      ],
+      "constraints": [],
+      "description": "OpenAI 官方高清拟真语音合成模型，支持语速控制与风格化预设"
+    },
+    {
+      "id": "f5-tts-clone",
+      "name": "F5-TTS Voice Clone",
+      "providerType": "fal",
+      "modelId": "fal-ai/f5-tts",
+      "modality": "audio",
+      "capabilities": {
+        "textToSpeech": true,
+        "voiceClone": true
+      },
+      "parameters": [
+        {
+          "key": "speed",
+          "label": "语速",
+          "type": "range",
+          "default": 1.0,
+          "min": 0.5,
+          "max": 2.0,
+          "step": 0.1,
+          "group": "克隆控制"
+        }
+      ],
+      "constraints": [],
+      "description": "开源 SOTA 极速非自回归声音克隆大模型，仅需少量参考音频即可克隆音色"
+    },
+    {
+      "id": "cosyvoice-speech-to-speech",
+      "name": "CosyVoice S2S",
+      "providerType": "generic-http",
+      "modelId": "cosyvoice-s2s",
+      "modality": "audio",
+      "capabilities": {
+        "speechToSpeech": true,
+        "voiceClone": true
+      },
+      "parameters": [
+        {
+          "key": "speed",
+          "label": "目标语速",
+          "type": "range",
+          "default": 1.0,
+          "min": 0.5,
+          "max": 2.0,
+          "step": 0.1,
+          "group": "变声控制"
+        }
+      ],
+      "constraints": [],
+      "transport": {
+        "http": {
+          "method": "POST",
+          "path": "v1/audio/speech-to-speech",
+          "body": {
+            "reference_audio": "{{referenceAudio}}",
+            "source_audio": "{{sourceAudio}}",
+            "speed": "{{speed}}"
+          },
+          "resultPath": "audio_url",
+          "resultKind": "url"
+        }
+      },
+      "description": "多语言多重情感语音转换与语音转语音模型"
+    }
+  ],
+  "canRollback": false
+}

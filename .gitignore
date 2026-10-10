@@ -1,0 +1,60 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies & Build Outputs
+node_modules
+dist
+dist-ssr
+*.local
+
+# Tauri & Rust Targets
+src-tauri/target/
+src-tauri/gen/schemas/
+target/
+
+# Packaged Release Binaries
+release-dist/
+*.exe
+*.msi
+*.zip
+*.tar.gz
+*.dmg
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor & System Files
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+Thumbs.db
+
+# Internal Scripts & Tooling
+scripts/
+
+# Internal Planning, PRD, Reports & Checklists (Private)
+AI Workbench Roadmap.md
+AI_Workbench_Hardening.md
+MODELDECK_FINALIZATION.md
+PERFORMANCE_BASELINE.md
+RELEASE_CHECKLIST.md
+RELEASE_NOTES_1.0.0.md
+*报告*.md
+*PRD*.md
+*.md
+!README.md

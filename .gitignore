@@ -58,3 +58,4 @@ RELEASE_NOTES_1.0.0.md
 *PRD*.md
 *.md
 !README.md
+!docs/**/*.md

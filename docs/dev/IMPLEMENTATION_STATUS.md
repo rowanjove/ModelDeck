@@ -52,7 +52,7 @@
 | **T04** | M1 | P0 | Agent/MCP 权限与本地资源边界 | **DONE** | `src-tauri/src/services/agent.rs`<br>`src-tauri/src/services/mcp.rs`<br>`src-tauri/src/services/chat.rs` | 实现高危工具通配符 `"*"` 阻断与精准人工确认门禁；受控工作区边界限定与目录穿越/符号链接逃逸阻断；`http_request` 全方位 SSRF 过滤（云元数据、私网、内网域名、禁用跨域重定向）；MCP 稳定身份 `server.id:tool.name`；敏感凭据脱敏审计日志；单元与集成测试 140 项全绿。 |
 | **T05** | M1 | P0 | 收紧 Tauri 资源边界、补齐最小发布前检验 | **DONE** | `src-tauri/tauri.conf.json`<br>`src-tauri/src/commands.rs`<br>`docs/dev/RELEASE_SMOKE_TEST.md` | 收紧 `assetProtocol.scope` 白名单作用域；核验 CSP 策略；为普通 IPC 文件读取与保存命令补充严格目录边界保护；形成最小发布前冒烟检验记录；测试增至 141 项全绿。 |
 | **T06** | M2 | P1 | GitHub Actions 与自动质量门禁 | **DONE** | `.github/workflows/ci.yml` | 建立 Windows 自动化质量门禁与发布演练工作流，包含类型检查、双端测试、Clippy 严格门禁、构建验证与 SHA256 校验和生成。 |
-| **T07** | M2 | P1 | Provider 契约测试及兼容矩阵 | **TODO** | `src-tauri/src/adapters/`<br>`docs/dev/PROVIDER_COMPATIBILITY.md` | 建立 Mock 契约覆盖矩阵，明确真实 API 兼容能力。 |
+| **T07** | M2 | P1 | Provider 契约测试及兼容矩阵 | **DONE** | `src-tauri/src/adapters/`<br>`src-tauri/src/integration_tests.rs`<br>`docs/dev/PROVIDER_COMPATIBILITY.md` | 产出详尽的 Provider × 模态 × 功能兼容性矩阵文档；划分 L1~L4 验证等级并消除不实断言；新增 Ollama 通信与连接探测、DeepSeek 思考链 (Reasoning)、Anthropic/Gemini 401/400 鉴权错误脱敏转换、音频与视频模型能力防呆门禁等 4 项核心契约测试（Rust 测试增至 145 项全绿）。 |
 | **T08** | M2 | P1 | 任务超时、取消、下载与重试一致性 | **TODO** | `job_queue.rs`<br>`image.rs`<br>`video.rs`<br>`audio.rs` | 统一任务生命周期、超时分类与原子文件下载。 |
 | **T09** | M2 | P1 | 数据持久化、凭据及备份恢复 | **TODO** | `src-tauri/src/db.rs`<br>`credentials.rs`<br>`services/config_io.rs` | SQLite WAL 校验、系统凭据兼容平滑迁移。 |
 | **T10** | M2 | P1 | 可复现的发布流程 | **TODO** | `RELEASE_CHECKLIST.md`<br>发布工作流与打包脚本 | 统一版本号、产物哈希比对与发布清单。 |

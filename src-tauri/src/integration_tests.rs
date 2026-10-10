@@ -5507,3 +5507,454 @@ async fn test_deleted_task_id_cannot_be_reclaimed() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn test_ollama_provider_contract_and_connection() {
+    let server = MockServer::start().await;
+
+    // 1. Mock /api/tags 用于连接测试
+    Mock::given(method("GET"))
+        .and(path("/api/tags"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "models": [{
+                "name": "llama3:latest",
+                "model": "llama3:latest",
+                "modified_at": "2026-10-01T00:00:00Z",
+                "size": 4661224676u64,
+                "digest": "sha256:123456"
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    // 2. Mock /api/chat 用于文本生成
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .and(body_string_contains("\"model\":\"llama3\""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "model": "llama3",
+            "created_at": "2026-10-10T12:00:00Z",
+            "message": {
+                "role": "assistant",
+                "content": "Hello from local Ollama instance!"
+            },
+            "done": true,
+            "total_duration": 500000000,
+            "prompt_eval_count": 5,
+            "eval_count": 8
+        })))
+        .mount(&server)
+        .await;
+
+    let (pool, secrets, dir) = setup().await;
+    let provider = services::providers::create(
+        &pool,
+        secrets.as_ref(),
+        ProviderInput {
+            name: "Local Ollama".to_string(),
+            provider_type: ProviderType::Ollama,
+            base_url: server.uri(),
+            api_key: None,
+            clear_api_key: false,
+            headers: BTreeMap::new(),
+            timeout_ms: 10_000,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    // 验证连接探针
+    let report = services::providers::test(&pool, &http, secrets.as_ref(), &provider.id)
+        .await
+        .unwrap();
+    assert_eq!(report.message, "已连接");
+
+    // 创建本地模型
+    let model = services::models::create(
+        &pool,
+        ModelInput {
+            name: "Llama 3 Local".to_string(),
+            provider_id: provider.id.clone(),
+            model_id: "llama3".to_string(),
+            modality: Modality::Text,
+            capabilities: json!({ "streaming": false, "vision": false }),
+            parameters: vec![],
+            constraints: vec![],
+            transport: None,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    // 验证生成调用
+    let result = services::generate::execute(
+        &pool,
+        &http,
+        secrets.as_ref(),
+        &dir,
+        GenerateTextInput {
+            model_definition_id: model.id,
+            system_prompt: None,
+            prompt: "Say hello".to_string(),
+            parameters: Map::new(),
+            extra: None,
+            images: vec![],
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.text, "Hello from local Ollama instance!");
+    assert_eq!(result.usage.unwrap().total_tokens, Some(13));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn test_openai_compatible_reasoning_content_contract() {
+    let server = MockServer::start().await;
+
+    // 模拟 DeepSeek-R1 / o1 类模型的思考链 reasoning_content 结构
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "chatcmpl-reasoning-123",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "最终结论：42",
+                    "reasoning_content": "首先计算宇宙的意义，经过深度推理得出数值 42。"
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 15,
+                "completion_tokens": 30,
+                "total_tokens": 45,
+                "completion_tokens_details": {
+                    "reasoning_tokens": 20
+                }
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let (pool, secrets, dir) = setup().await;
+    let provider = services::providers::create(
+        &pool,
+        secrets.as_ref(),
+        ProviderInput {
+            name: "DeepSeek Provider".to_string(),
+            provider_type: ProviderType::OpenaiCompatible,
+            base_url: format!("{}/v1", server.uri()),
+            api_key: Some("sk-reasoning-test".to_string()),
+            clear_api_key: false,
+            headers: BTreeMap::new(),
+            timeout_ms: 10_000,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let model = services::models::create(
+        &pool,
+        ModelInput {
+            name: "DeepSeek R1".to_string(),
+            provider_id: provider.id,
+            model_id: "deepseek-reasoner".to_string(),
+            modality: Modality::Text,
+            capabilities: json!({ "streaming": false, "vision": false }),
+            parameters: vec![],
+            constraints: vec![],
+            transport: None,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let result = services::generate::execute(
+        &pool,
+        &http,
+        secrets.as_ref(),
+        &dir,
+        GenerateTextInput {
+            model_definition_id: model.id,
+            system_prompt: None,
+            prompt: "宇宙的终极答案是什么？".to_string(),
+            parameters: Map::new(),
+            extra: None,
+            images: vec![],
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.text, "最终结论：42");
+    assert_eq!(
+        result.reasoning,
+        "首先计算宇宙的意义，经过深度推理得出数值 42。"
+    );
+    let usage = result.usage.unwrap();
+    assert_eq!(usage.total_tokens, Some(45));
+    assert_eq!(usage.reasoning_tokens, Some(20));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn test_anthropic_and_gemini_error_contract() {
+    let server = MockServer::start().await;
+    let secret = "sk-ant-test-err-key";
+
+    // 1. Anthropic 401 模拟
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+            "type": "error",
+            "error": {
+                "type": "authentication_error",
+                "message": "invalid x-api-key provided"
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    // 2. Gemini 400 API Key 无效模拟
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/gemini-pro:generateContent"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": {
+                "code": 400,
+                "message": "API key not valid. Please pass a valid API key.",
+                "status": "INVALID_ARGUMENT"
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let (pool, secrets, dir) = setup().await;
+
+    // 测试 Anthropic 错误转换
+    let ant_provider = image_provider(
+        &pool,
+        secrets.as_ref(),
+        "Anthropic Err",
+        ProviderType::Anthropic,
+        &server.uri(),
+        Some(secret),
+    )
+    .await;
+    let ant_model = services::models::create(
+        &pool,
+        text_model("Claude Err", ant_provider.id, "claude-3-opus"),
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let ant_err = services::generate::execute(
+        &pool,
+        &http,
+        secrets.as_ref(),
+        &dir,
+        GenerateTextInput {
+            model_definition_id: ant_model.id,
+            system_prompt: None,
+            prompt: "ping".to_string(),
+            parameters: Map::new(),
+            extra: None,
+            images: vec![],
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(ant_err.code, crate::error::AUTH);
+    assert!(ant_err.message.contains("invalid x-api-key"));
+    assert!(!ant_err.message.contains(secret));
+
+    // 测试 Gemini 错误转换
+    let gem_provider = image_provider(
+        &pool,
+        secrets.as_ref(),
+        "Gemini Err",
+        ProviderType::Gemini,
+        &server.uri(),
+        Some("gem-key-err"),
+    )
+    .await;
+    let gem_model = services::models::create(
+        &pool,
+        text_model("Gemini Err", gem_provider.id, "models/gemini-pro"),
+    )
+    .await
+    .unwrap();
+
+    let gem_err = services::generate::execute(
+        &pool,
+        &http,
+        secrets.as_ref(),
+        &dir,
+        GenerateTextInput {
+            model_definition_id: gem_model.id,
+            system_prompt: None,
+            prompt: "ping".to_string(),
+            parameters: Map::new(),
+            extra: None,
+            images: vec![],
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(gem_err.message.contains("API key not valid"));
+    assert!(!gem_err.message.contains("gem-key-err"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn test_feature_capabilities_strict_contract_enforcement() {
+    let (pool, secrets, dir) = setup().await;
+
+    // 1. 测试音频模型不支持 voiceClone 时拒绝 reference_audio
+    let audio_provider = services::providers::create(
+        &pool,
+        secrets.as_ref(),
+        ProviderInput {
+            name: "TTS Provider".to_string(),
+            provider_type: ProviderType::OpenaiCompatible,
+            base_url: "http://127.0.0.1:9000/v1".to_string(),
+            api_key: None,
+            clear_api_key: false,
+            headers: BTreeMap::new(),
+            timeout_ms: 5000,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let tts_only_model = services::models::create(
+        &pool,
+        ModelInput {
+            name: "TTS Only".to_string(),
+            provider_id: audio_provider.id.clone(),
+            model_id: "tts-basic".to_string(),
+            modality: Modality::Audio,
+            capabilities: json!({ "textToSpeech": true, "voiceClone": false }),
+            parameters: vec![],
+            constraints: vec![],
+            transport: None,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let audio_err = services::audio::execute(
+        &pool,
+        &http,
+        secrets.as_ref(),
+        &dir,
+        GenerateAudioInput {
+            model_definition_id: tts_only_model.id,
+            task: Some("tts".to_string()),
+            text: "测试朗读".to_string(),
+            voice: None,
+            source_audio: None,
+            reference_audio: Some(MediaRef::from_path("ref_sample.mp3")),
+            reference_transcript: None,
+            parameters: Map::new(),
+            extra: None,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(audio_err.code, crate::error::UNSUPPORTED);
+    assert!(audio_err.message.contains("当前模型不接受参考音频"));
+
+    // 2. 测试视频模型不支持 lastFrame 时拒绝 last_frame
+    let video_provider = services::providers::create(
+        &pool,
+        secrets.as_ref(),
+        ProviderInput {
+            name: "Video Provider".to_string(),
+            provider_type: ProviderType::Comfyui,
+            base_url: "http://127.0.0.1:8188".to_string(),
+            api_key: None,
+            clear_api_key: false,
+            headers: BTreeMap::new(),
+            timeout_ms: 5000,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let video_model = services::models::create(
+        &pool,
+        ModelInput {
+            name: "Video No Last Frame".to_string(),
+            provider_id: video_provider.id,
+            model_id: "video-no-last".to_string(),
+            modality: Modality::Video,
+            capabilities: json!({ "textToVideo": true, "firstFrame": true, "lastFrame": false }),
+            parameters: vec![],
+            constraints: vec![],
+            transport: Some(TransportDefinition {
+                workflow: Some(json!({ "3": { "class_type": "KSampler" } })),
+                bindings: Some(vec![WorkflowBinding {
+                    key: "prompt".to_string(),
+                    node: "3".to_string(),
+                    input: "positive".to_string(),
+                }]),
+                ..TransportDefinition::default()
+            }),
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let video_err = services::video::execute(
+        &pool,
+        &http,
+        secrets.as_ref(),
+        &dir,
+        GenerateVideoInput {
+            model_definition_id: video_model.id,
+            prompt: "a walking cat".to_string(),
+            negative_prompt: None,
+            first_frame: Some(MediaRef::from_path("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")),
+            last_frame: Some(MediaRef::from_path("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")),
+            reference_images: vec![],
+            reference_videos: vec![],
+            reference_audios: vec![],
+            parameters: Map::new(),
+            extra: None,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(video_err.code, crate::error::UNSUPPORTED);
+    assert!(video_err.message.contains("该模型没有尾帧能力"));
+
+    // 确认契约防呆拦截未写入 generation_tasks 脏记录
+    let history_page = services::history::list(&pool, HistoryQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(history_page.total, 0);
+
+    let _ = std::fs::remove_dir_all(dir);
+}

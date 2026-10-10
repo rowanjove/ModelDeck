@@ -20,6 +20,10 @@ pub struct AssetLibraryItem {
     pub model_name: String,
     pub provider_name: String,
     pub created_at: String,
+    pub file_exists: bool,
+    pub file_size_bytes: Option<u64>,
+    pub parameters: Option<serde_json::Value>,
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,8 +175,8 @@ pub async fn list_asset_library(
     };
 
     let sql = format!(
-        "SELECT a.id, a.task_id, a.type, a.path, a.url, a.mime_type, a.width, a.height, a.duration_ms, a.created_at,
-                t.input_json, t.model_id,
+        "SELECT a.id, a.task_id, a.type, a.path, a.url, a.mime_type, a.width, a.height, a.duration_ms, a.created_at, a.metadata_json,
+                t.input_json, t.parameters_json, t.model_id,
                 p.name AS provider_name, m.name AS model_name
          FROM assets a
          JOIN generation_tasks t ON t.id = a.task_id
@@ -219,11 +223,36 @@ pub async fn list_asset_library(
             .flatten()
             .map(|d| d as u32);
 
+        let path: Option<String> = row.try_get("path").ok();
+        let (file_exists, file_size_bytes) = match &path {
+            Some(p) => {
+                let p_buf = std::path::Path::new(p);
+                if p_buf.is_file() {
+                    (true, std::fs::metadata(p_buf).ok().map(|m| m.len()))
+                } else {
+                    (false, None)
+                }
+            }
+            None => (false, None),
+        };
+
+        let parameters = row
+            .try_get::<Option<String>, _>("parameters_json")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+
+        let metadata = row
+            .try_get::<Option<String>, _>("metadata_json")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+
         items.push(AssetLibraryItem {
             id: row.try_get("id").map_err(AppError::db)?,
             task_id: row.try_get("task_id").map_err(AppError::db)?,
             asset_type: row.try_get("type").map_err(AppError::db)?,
-            path: row.try_get("path").ok(),
+            path,
             url: row.try_get("url").ok(),
             mime_type: row.try_get("mime_type").ok(),
             width,
@@ -240,6 +269,10 @@ pub async fn list_asset_library(
                 .unwrap_or_default()
                 .unwrap_or_else(|| "本地服务".to_string()),
             created_at: row.try_get("created_at").map_err(AppError::db)?,
+            file_exists,
+            file_size_bytes,
+            parameters,
+            metadata,
         });
     }
 
@@ -837,6 +870,113 @@ mod tests {
             count_after.0, 0,
             "Trigger should automatically delete FTS entry on conversation delete"
         );
+        drop(pool);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn test_asset_library_provenance_and_file_existence() {
+        let dir = std::env::temp_dir().join(format!("test_asset_lib_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test_assets.db");
+        let pool = crate::db::open(&db_path).await.unwrap();
+        crate::db::migrate(&pool).await.unwrap();
+
+        // 1. 准备真实的物理测试文件
+        let real_file_path = dir.join("real_image.png");
+        std::fs::write(&real_file_path, b"test-fake-png-content-data").unwrap();
+        let missing_file_path = dir.join("non_existent_image.png");
+
+        // 2. 插入 provider 与 model
+        let prov_id = uuid::Uuid::new_v4().to_string();
+        let model_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO providers (id, name, type, base_url, headers_json, timeout_ms, enabled, created_at, updated_at) VALUES (?, 'Test Provider', 'openai', 'https://api.openai.com', '{}', 10000, 1, '2026-10-01', '2026-10-01')")
+            .bind(&prov_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO models (id, name, provider_id, model_id, modality, capabilities_json, parameters_json, constraints_json, enabled, created_at, updated_at) VALUES (?, 'DALL-E 3', ?, 'dall-e-3', 'image', '{}', '[]', '[]', 1, '2026-10-01', '2026-10-01')")
+            .bind(&model_id)
+            .bind(&prov_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // 3. 插入 generation_task（携带参数与输入）
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let input_json = serde_json::json!({
+            "prompt": "Cyberpunk neon street in rain",
+            "size": "1024x1024"
+        })
+        .to_string();
+        let params_json = serde_json::json!({
+            "seed": 4242,
+            "steps": 30,
+            "cfgScale": 7.5
+        })
+        .to_string();
+
+        sqlx::query("INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, input_json, parameters_json, created_at) VALUES (?, 'image', ?, ?, 'completed', ?, ?, '2026-10-01')")
+            .bind(&task_id)
+            .bind(&prov_id)
+            .bind(&model_id)
+            .bind(&input_json)
+            .bind(&params_json)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // 4. 插入两个资产记录：一个真实存在，一个物理文件缺失
+        let asset_id_real = uuid::Uuid::new_v4().to_string();
+        let asset_id_missing = uuid::Uuid::new_v4().to_string();
+        let real_path_str = real_file_path.to_string_lossy().to_string();
+        let missing_path_str = missing_file_path.to_string_lossy().to_string();
+
+        sqlx::query("INSERT INTO assets (id, task_id, type, path, mime_type, width, height, metadata_json, created_at) VALUES (?, ?, 'image', ?, 'image/png', 1024, 1024, '{\"role\":\"output\"}', '2026-10-01 10:00:00')")
+            .bind(&asset_id_real)
+            .bind(&task_id)
+            .bind(&real_path_str)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("INSERT INTO assets (id, task_id, type, path, mime_type, width, height, metadata_json, created_at) VALUES (?, ?, 'image', ?, 'image/png', 1024, 1024, '{\"role\":\"output\"}', '2026-10-01 09:00:00')")
+            .bind(&asset_id_missing)
+            .bind(&task_id)
+            .bind(&missing_path_str)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // 5. 调用 list_asset_library 验证
+        let assets = list_asset_library(&pool, Some("image".to_string()), None, Some(10), Some(0))
+            .await
+            .unwrap();
+        assert_eq!(assets.len(), 2);
+
+        let real_item = assets.iter().find(|a| a.id == asset_id_real).unwrap();
+        assert_eq!(real_item.prompt, "Cyberpunk neon street in rain");
+        assert_eq!(real_item.model_name, "DALL-E 3");
+        assert_eq!(real_item.provider_name, "Test Provider");
+        assert!(
+            real_item.file_exists,
+            "Real file must be detected as existing"
+        );
+        assert!(
+            real_item.file_size_bytes.unwrap() > 0,
+            "File size must be positive"
+        );
+        let params = real_item.parameters.as_ref().unwrap();
+        assert_eq!(params["seed"], 4242);
+        assert_eq!(params["steps"], 30);
+
+        let missing_item = assets.iter().find(|a| a.id == asset_id_missing).unwrap();
+        assert!(
+            !missing_item.file_exists,
+            "Missing file must be marked as not existing"
+        );
+        assert_eq!(missing_item.file_size_bytes, None);
+
         drop(pool);
         let _ = std::fs::remove_dir_all(dir);
     }

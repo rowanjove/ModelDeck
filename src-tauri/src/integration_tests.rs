@@ -5968,17 +5968,21 @@ async fn test_release_version_consistency_and_metadata() {
     let package_json_path = manifest_dir.parent().unwrap().join("package.json");
     let package_json_content = std::fs::read_to_string(&package_json_path)
         .expect("package.json should exist in project root");
-    let package_val: serde_json::Value = serde_json::from_str(&package_json_content)
-        .expect("package.json should be valid JSON");
-    let package_version = package_val["version"].as_str().expect("package.json should have string version");
+    let package_val: serde_json::Value =
+        serde_json::from_str(&package_json_content).expect("package.json should be valid JSON");
+    let package_version = package_val["version"]
+        .as_str()
+        .expect("package.json should have string version");
 
     // 2. 读取 tauri.conf.json
     let tauri_conf_path = manifest_dir.join("tauri.conf.json");
     let tauri_conf_content = std::fs::read_to_string(&tauri_conf_path)
         .expect("tauri.conf.json should exist in src-tauri");
-    let tauri_val: serde_json::Value = serde_json::from_str(&tauri_conf_content)
-        .expect("tauri.conf.json should be valid JSON");
-    let tauri_version = tauri_val["version"].as_str().expect("tauri.conf.json should have string version");
+    let tauri_val: serde_json::Value =
+        serde_json::from_str(&tauri_conf_content).expect("tauri.conf.json should be valid JSON");
+    let tauri_version = tauri_val["version"]
+        .as_str()
+        .expect("tauri.conf.json should have string version");
 
     // 3. 断言版本号完全一致
     assert_eq!(
@@ -5993,7 +5997,11 @@ async fn test_release_version_consistency_and_metadata() {
     // 4. 验证发布元数据与标识符
     assert_eq!(tauri_val["productName"].as_str().unwrap(), "ModelDeck");
     assert_eq!(tauri_val["identifier"].as_str().unwrap(), "local.modeldeck");
-    assert_eq!(tauri_val["bundle"]["active"].as_bool().unwrap(), true);
-    assert_eq!(tauri_val["bundle"]["windows"]["nsis"]["installMode"].as_str().unwrap(), "currentUser");
+    assert!(tauri_val["bundle"]["active"].as_bool().unwrap());
+    assert_eq!(
+        tauri_val["bundle"]["windows"]["nsis"]["installMode"]
+            .as_str()
+            .unwrap(),
+        "currentUser"
+    );
 }
-

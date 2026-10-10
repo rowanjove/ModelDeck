@@ -1075,6 +1075,10 @@ export interface AssetLibraryItem {
   modelName: string;
   providerName: string;
   createdAt: string;
+  fileExists: boolean;
+  fileSizeBytes?: number | null;
+  parameters?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface UnifiedSearchItem {

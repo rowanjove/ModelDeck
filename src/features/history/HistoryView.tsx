@@ -994,6 +994,7 @@ export function HistoryView({
         {viewMode === "assets" && (
           <div style={{ flex: 1, minHeight: 0 }}>
             <AssetLibraryView
+              onOpenText={onOpenText}
               onOpenImage={onOpenImage}
               onOpenVideo={onOpenVideo}
               onOpenAudio={onOpenAudio}

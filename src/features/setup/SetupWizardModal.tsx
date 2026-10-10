@@ -44,9 +44,9 @@ interface PurposeOption {
 const PURPOSE_OPTIONS: PurposeOption[] = [
   {
     id: "chat",
-    title: "对话与文本理解",
+    title: "文本对话与推理",
     badge: "推荐",
-    description: "问答、代码编写、深度思考推理、长文本总结",
+    description: "日常问答、代码辅助、文本理解与结构化输出",
     recommendedModality: "text",
     recommendedProviders: [
       "openai-compatible",
@@ -58,33 +58,33 @@ const PURPOSE_OPTIONS: PurposeOption[] = [
   },
   {
     id: "image",
-    title: "图像生成与创作",
+    title: "图像生成",
     badge: "多模态",
-    description: "文生图、画风渲染、视觉素材与设计草图",
+    description: "文生图、图生图与视觉素材渲染",
     recommendedModality: "image",
     recommendedProviders: ["openai", "comfyui", "fal", "replicate"],
   },
   {
     id: "video",
-    title: "视频生成与分镜",
+    title: "视频生成",
     badge: "多模态",
-    description: "文生视频、图生视频、动态视觉演练",
+    description: "文生视频与首帧驱动视频",
     recommendedModality: "video",
     recommendedProviders: ["comfyui", "fal", "replicate"],
   },
   {
     id: "audio",
-    title: "音频与语音合成",
+    title: "语音合成",
     badge: "多模态",
-    description: "自然语音 TTS、声音克隆与配音朗读",
+    description: "文本转语音 (TTS) 与参考音频驱动",
     recommendedModality: "audio",
     recommendedProviders: ["openai"],
   },
   {
     id: "local",
-    title: "本地离线模型服务",
-    badge: "完全私有",
-    description: "基于本地 Ollama 或 ComfyUI，不产生网络外发与任何云端费用",
+    title: "本地离线服务",
+    badge: "免外部网络",
+    description: "连接本地 Ollama 或 ComfyUI，离线运行且无云端调用费用",
     recommendedModality: "text",
     recommendedProviders: ["ollama", "comfyui", "openai-compatible"],
   },
@@ -496,11 +496,10 @@ export function SetupWizardModal({
                 lineHeight: 1.4,
               }}
             >
-              {step === 1 &&
-                "选择主要使用场景，我们将自动为您匹配最适配的模型配置。"}
-              {step === 2 && "连接您的首个 AI 模型服务商并完成连通性测试。"}
-              {step === 3 && "挑选或发现首个模型，查看可用能力与生成参数。"}
-              {step === 4 && "配置已就绪！立即开启您的第一次生成体验。"}
+              {step === 1 && "选择主要使用场景，后续可在设置中随时扩展或调整。"}
+              {step === 2 && "配置模型服务端点并测试网络连通性。"}
+              {step === 3 && "指定或自动发现模型，确认支持的能力与默认参数。"}
+              {step === 4 && "配置已就绪，可直接进入对应工作区开始使用。"}
             </p>
           </div>
           <button
@@ -536,7 +535,7 @@ export function SetupWizardModal({
                   color: "var(--ink)",
                 }}
               >
-                请选择您最关心的核心能力（可随时在设置中追加其他模态）：
+                选择默认工作场景（其他模态随时可在设置中添加）：
               </p>
               {PURPOSE_OPTIONS.map((opt) => {
                 const isSelected = purpose === opt.id;
@@ -599,6 +598,7 @@ export function SetupWizardModal({
                         {opt.description}
                       </p>
                     </div>
+
                     <span
                       style={{
                         width: "18px",
@@ -630,6 +630,61 @@ export function SetupWizardModal({
                   </button>
                 );
               })}
+
+              <div
+                style={{
+                  marginTop: "4px",
+                  padding: "8px 12px",
+                  borderRadius: "var(--radius-sm)",
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--line)",
+                  fontSize: "12px",
+                  color: "var(--soft)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span>全局命令面板快捷键：</span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                >
+                  <kbd
+                    style={{
+                      padding: "1px 6px",
+                      background: "var(--raised)",
+                      border: "1px solid var(--line)",
+                      borderRadius: "3px",
+                      fontSize: "11px",
+                      color: "var(--ink)",
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    Ctrl
+                  </kbd>
+                  <span>+</span>
+                  <kbd
+                    style={{
+                      padding: "1px 6px",
+                      background: "var(--raised)",
+                      border: "1px solid var(--line)",
+                      borderRadius: "3px",
+                      fontSize: "11px",
+                      color: "var(--ink)",
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    K
+                  </kbd>
+                  <span style={{ marginLeft: "4px", fontSize: "11px" }}>
+                    （任意界面均可呼出进行页面跳转与搜索）
+                  </span>
+                </span>
+              </div>
             </div>
           )}
 
@@ -946,7 +1001,7 @@ export function SetupWizardModal({
                 }}
               >
                 <div style={{ fontWeight: 600, color: "var(--ink)" }}>
-                  准备就绪的模型能力概览：
+                  模型能力与运行特性：
                 </div>
                 <div
                   style={{
@@ -964,7 +1019,7 @@ export function SetupWizardModal({
                       background: "var(--sunken)",
                     }}
                   >
-                    ⚡ 流式响应 (Streaming)
+                    流式传输 (Streaming)
                   </span>
                   <span
                     style={{
@@ -974,7 +1029,7 @@ export function SetupWizardModal({
                       background: "var(--sunken)",
                     }}
                   >
-                    🛠️ 自动化参数 Schema 驱动
+                    参数约束校验 (Schema)
                   </span>
                   <span
                     style={{
@@ -984,7 +1039,7 @@ export function SetupWizardModal({
                       background: "var(--sunken)",
                     }}
                   >
-                    🛡️ 崩溃自动状态恢复保障
+                    任务中断恢复保障
                   </span>
                 </div>
               </div>
@@ -1041,7 +1096,7 @@ export function SetupWizardModal({
                     color: "var(--ink)",
                   }}
                 >
-                  配置已就绪！恭喜完成首次设置
+                  初始化配置已就绪
                 </h3>
                 <p
                   style={{
@@ -1051,26 +1106,109 @@ export function SetupWizardModal({
                     lineHeight: 1.5,
                   }}
                 >
-                  已成功绑定服务商 <strong>{createdProvider?.name}</strong>{" "}
-                  并添加模型 <strong>{createdModel?.name}</strong>。
+                  已接入服务商 <strong>{createdProvider?.name}</strong>，
+                  默认模型已设为 <strong>{createdModel?.name}</strong>。
                   <br />
-                  模型参数已自动加载，您可以立即开始您的第一次生成测试！
+                  配置参数已自动载入，点击下方按钮即可直接进入对应工作区开始使用。
+                </p>
+              </div>
+
+              {/* 快捷键交互演示卡片 */}
+              <div
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--line)",
+                  textAlign: "left",
+                  display: "grid",
+                  gap: "6px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <strong style={{ fontSize: "13px", color: "var(--ink)" }}>
+                    常用快捷键：全局命令面板
+                  </strong>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <kbd
+                      style={{
+                        padding: "2px 7px",
+                        borderRadius: "4px",
+                        background: "var(--raised)",
+                        border: "1px solid var(--line)",
+                        fontSize: "12px",
+                        fontFamily: "monospace",
+                        color: "var(--ink)",
+                        boxShadow: "var(--shadow-sm)",
+                      }}
+                    >
+                      Ctrl
+                    </kbd>
+                    <span style={{ color: "var(--soft)" }}>+</span>
+                    <kbd
+                      style={{
+                        padding: "2px 7px",
+                        borderRadius: "4px",
+                        background: "var(--raised)",
+                        border: "1px solid var(--line)",
+                        fontSize: "12px",
+                        fontFamily: "monospace",
+                        color: "var(--ink)",
+                        boxShadow: "var(--shadow-sm)",
+                      }}
+                    >
+                      K
+                    </kbd>
+                  </span>
+                </div>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "12px",
+                    color: "var(--soft)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  在任何页面均可随时按下{" "}
+                  <kbd
+                    style={{
+                      padding: "1px 4px",
+                      fontSize: "11px",
+                      border: "1px solid var(--line)",
+                      borderRadius: "3px",
+                    }}
+                  >
+                    Ctrl+K
+                  </kbd>{" "}
+                  呼出命令面板，支持快速切换文本、图像、视频工作区、检索模型或直达系统设置。
                 </p>
               </div>
 
               <div
                 style={{
-                  padding: "12px",
+                  padding: "10px 12px",
                   borderRadius: "var(--radius-md)",
-                  background: "var(--surface-2)",
+                  background: "var(--surface-1)",
                   fontSize: "12px",
                   color: "var(--soft)",
                   textAlign: "left",
                 }}
               >
-                <strong>💡 随时回来调整：</strong>
+                <strong>设置与调整：</strong>
                 <p style={{ margin: "4px 0 0 0" }}>
-                  您可以随时在左侧导航的“模型”中调整温度、上下文与参数约束，或在“设置”中追加其他多模态服务商与网络代理。
+                  后续可随时在左侧“模型”中调整参数，或在“设置”中追加其他多模态服务商与网络代理。
                 </p>
               </div>
             </div>
@@ -1138,7 +1276,7 @@ export function SetupWizardModal({
               >
                 {isTesting || saveAndTestProvider.isPending
                   ? "正在测试连通性..."
-                  : "⚡ 测试连接并继续"}
+                  : "测试连接并继续"}
               </button>
             )}
 
@@ -1156,7 +1294,7 @@ export function SetupWizardModal({
                 }}
               >
                 {createFirstModel.isPending
-                  ? "正在生成模型..."
+                  ? "正在保存模型..."
                   : "完成模型配置"}
               </button>
             )}
@@ -1173,7 +1311,7 @@ export function SetupWizardModal({
                   fontWeight: 600,
                 }}
               >
-                🚀 立即开始我的第一次生成
+                进入工作台
               </button>
             )}
           </div>

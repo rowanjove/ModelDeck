@@ -225,38 +225,16 @@ export function Shell() {
             <em>模型工作台</em>
           </div>
         </div>
-        <div style={{ display: "flex", gap: "6px", margin: "0 0 10px 0" }}>
-          <button
-            type="button"
-            className="nav-new"
-            onClick={startNew}
-            title="新建工作区草稿 (Ctrl+N)"
-            style={{ flex: 1, margin: 0 }}
-          >
-            新建草稿
-          </button>
-          <button
-            type="button"
-            title="打开命令面板 (Ctrl+K)"
-            onClick={() => setSwitcher(true)}
-            style={{
-              padding: "0 10px",
-              width: "auto",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "var(--raised)",
-              border: "1px solid var(--line)",
-              borderRadius: "var(--radius-md)",
-              color: "var(--ink-secondary)",
-              margin: 0,
-              fontSize: "13px",
-              boxShadow: "var(--shadow-sm)",
-            }}
-          >
-            Ctrl K
-          </button>
-        </div>
+        <button
+          type="button"
+          className="nav-new"
+          onClick={startNew}
+          title="新建工作区草稿 (Ctrl+N)"
+          style={{ margin: "0 0 10px 0", width: "100%" }}
+        >
+          新建草稿
+        </button>
+
         <button
           type="button"
           className="nav-item"

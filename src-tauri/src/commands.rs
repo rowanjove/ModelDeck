@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tauri::ipc::Channel;
@@ -152,8 +152,43 @@ pub async fn generate_image(
     result
 }
 
+fn validate_media_read_path(path: &str, data_dir: &Path) -> Result<(), AppError> {
+    let p = Path::new(path);
+    let path_str = path.to_ascii_lowercase();
+    if path_str.contains("/.ssh")
+        || path_str.contains("\\.ssh")
+        || path_str.contains("/windows/")
+        || path_str.contains("\\windows\\")
+        || path_str.contains("/etc/shadow")
+        || path_str.contains("/etc/passwd")
+    {
+        return Err(AppError::validation(
+            "安全策略拦截：禁止访问系统保护或凭据目录",
+        ));
+    }
+    if let Ok(canon_file) = std::fs::canonicalize(p) {
+        let canon_dd = std::fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
+        if canon_file.starts_with(&canon_dd) {
+            let allowed_subdirs = ["images", "videos", "audio", "files"];
+            let is_in_allowed = allowed_subdirs
+                .iter()
+                .any(|sub| canon_file.starts_with(canon_dd.join(sub)));
+            if !is_in_allowed {
+                return Err(AppError::validation(
+                    "安全策略拦截：禁止直接访问应用非媒体数据文件",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
-pub async fn read_image_file(path: String) -> Result<services::image::ImageFile, AppError> {
+pub async fn read_image_file(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<services::image::ImageFile, AppError> {
+    validate_media_read_path(&path, &state.data_dir)?;
     services::image::read_file(&path).await
 }
 
@@ -202,7 +237,11 @@ pub async fn generate_video(
 }
 
 #[tauri::command]
-pub async fn read_video_file(path: String) -> Result<services::video::VideoFile, AppError> {
+pub async fn read_video_file(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<services::video::VideoFile, AppError> {
+    validate_media_read_path(&path, &state.data_dir)?;
     services::video::read_file(&path).await
 }
 
@@ -298,7 +337,11 @@ async fn claim_direct_task(
 }
 
 #[tauri::command]
-pub async fn read_audio_file(path: String) -> Result<services::audio::AudioFile, AppError> {
+pub async fn read_audio_file(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<services::audio::AudioFile, AppError> {
+    validate_media_read_path(&path, &state.data_dir)?;
     services::audio::read_file(&path).await
 }
 
@@ -522,7 +565,11 @@ pub async fn history_delete_all(
 }
 
 #[tauri::command]
-pub async fn save_text_file(path: String, content: String) -> Result<(), AppError> {
+pub async fn save_text_file(
+    state: State<'_, AppState>,
+    path: String,
+    content: String,
+) -> Result<(), AppError> {
     if content.len() > 5_000_000 {
         return Err(AppError::validation("内容过大"));
     }
@@ -557,6 +604,10 @@ pub async fn save_text_file(path: String, content: String) -> Result<(), AppErro
         || path_str.contains("/windows/")
         || path_str.contains("start menu\\programs\\startup")
         || path_str.contains("start menu/programs/startup")
+        || path_str.contains("/.ssh")
+        || path_str.contains("\\.ssh")
+        || path_str.contains("/etc/shadow")
+        || path_str.contains("/etc/passwd")
     {
         return Err(AppError::validation("禁止向系统保护目录保存文件"));
     }
@@ -565,6 +616,13 @@ pub async fn save_text_file(path: String, content: String) -> Result<(), AppErro
     };
     if !parent.exists() {
         return Err(AppError::validation("保存目录不存在"));
+    }
+    let data_dir_canon =
+        std::fs::canonicalize(&state.data_dir).unwrap_or_else(|_| state.data_dir.clone());
+    if let Ok(canon_parent) = std::fs::canonicalize(parent) {
+        if canon_parent.starts_with(&data_dir_canon) {
+            return Err(AppError::validation("禁止直接覆盖应用数据目录文件"));
+        }
     }
     tokio::fs::write(path, content)
         .await
@@ -1208,4 +1266,43 @@ pub async fn logs_list(
     limit: Option<usize>,
 ) -> Result<Vec<crate::logging::LogEntry>, AppError> {
     Ok(state.logs.recent(limit.unwrap_or(100)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_media_read_path_rules() {
+        let temp_root =
+            std::env::temp_dir().join(format!("md-media-test-{}", uuid::Uuid::new_v4()));
+        let data_dir = temp_root.join("app_data");
+        let images_dir = data_dir.join("images");
+        std::fs::create_dir_all(&images_dir).unwrap();
+
+        // 1. 合法应用内媒体子目录
+        let sample_img = images_dir.join("avatar.png");
+        std::fs::write(&sample_img, b"fake image").unwrap();
+        assert!(validate_media_read_path(sample_img.to_str().unwrap(), &data_dir).is_ok());
+
+        // 2. 非媒体数据文件（如数据库）必须被拦截
+        let db_file = data_dir.join("modeldeck.db");
+        std::fs::write(&db_file, b"sqlite header").unwrap();
+        let err_db = validate_media_read_path(db_file.to_str().unwrap(), &data_dir).unwrap_err();
+        assert!(err_db.message.contains("禁止直接访问应用非媒体数据文件"));
+
+        // 3. 系统凭据目录必须被拦截
+        assert!(validate_media_read_path("C:\\Users\\user\\.ssh\\id_rsa", &data_dir).is_err());
+        assert!(validate_media_read_path("/home/user/.ssh/id_rsa", &data_dir).is_err());
+        assert!(validate_media_read_path("C:\\Windows\\System32\\cmd.exe", &data_dir).is_err());
+
+        // 4. 外部常规图片文件允许访问
+        let outside_dir = temp_root.join("external_photos");
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        let outside_img = outside_dir.join("photo.jpg");
+        std::fs::write(&outside_img, b"fake photo").unwrap();
+        assert!(validate_media_read_path(outside_img.to_str().unwrap(), &data_dir).is_ok());
+
+        let _ = std::fs::remove_dir_all(temp_root);
+    }
 }

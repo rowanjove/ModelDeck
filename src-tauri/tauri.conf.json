@@ -23,7 +23,17 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http: https:; media-src 'self' data: asset: http: https:; font-src 'self' data:; connect-src 'self' ipc: http: https: ws:",
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "$APPDATA/**",
+          "$APPLOCALDATA/**",
+          "$LOCALDATA/**",
+          "$TEMP/**",
+          "$PICTURE/**",
+          "$VIDEO/**",
+          "$AUDIO/**",
+          "$DOWNLOAD/**",
+          "$DOCUMENT/**"
+        ]
       }
     }
   },

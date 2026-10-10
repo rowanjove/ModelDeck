@@ -5958,3 +5958,42 @@ async fn test_feature_capabilities_strict_contract_enforcement() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn test_release_version_consistency_and_metadata() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cargo_version = env!("CARGO_PKG_VERSION");
+
+    // 1. 读取 package.json
+    let package_json_path = manifest_dir.parent().unwrap().join("package.json");
+    let package_json_content = std::fs::read_to_string(&package_json_path)
+        .expect("package.json should exist in project root");
+    let package_val: serde_json::Value = serde_json::from_str(&package_json_content)
+        .expect("package.json should be valid JSON");
+    let package_version = package_val["version"].as_str().expect("package.json should have string version");
+
+    // 2. 读取 tauri.conf.json
+    let tauri_conf_path = manifest_dir.join("tauri.conf.json");
+    let tauri_conf_content = std::fs::read_to_string(&tauri_conf_path)
+        .expect("tauri.conf.json should exist in src-tauri");
+    let tauri_val: serde_json::Value = serde_json::from_str(&tauri_conf_content)
+        .expect("tauri.conf.json should be valid JSON");
+    let tauri_version = tauri_val["version"].as_str().expect("tauri.conf.json should have string version");
+
+    // 3. 断言版本号完全一致
+    assert_eq!(
+        cargo_version, package_version,
+        "Cargo.toml ({cargo_version}) and package.json ({package_version}) version mismatch"
+    );
+    assert_eq!(
+        cargo_version, tauri_version,
+        "Cargo.toml ({cargo_version}) and tauri.conf.json ({tauri_version}) version mismatch"
+    );
+
+    // 4. 验证发布元数据与标识符
+    assert_eq!(tauri_val["productName"].as_str().unwrap(), "ModelDeck");
+    assert_eq!(tauri_val["identifier"].as_str().unwrap(), "local.modeldeck");
+    assert_eq!(tauri_val["bundle"]["active"].as_bool().unwrap(), true);
+    assert_eq!(tauri_val["bundle"]["windows"]["nsis"]["installMode"].as_str().unwrap(), "currentUser");
+}
+

@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "check:version": "node scripts/check-version-consistency.cjs",
     "lint": "biome check .",
     "format": "biome format --write .",
     "tauri": "tauri"

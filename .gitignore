@@ -44,18 +44,17 @@ release-dist/
 *.sw?
 Thumbs.db
 
-# Internal Scripts & Tooling
-scripts/
+# Internal Scripts & Tooling (Private review tools only)
+scripts/ui-review.cjs
 
-# Internal Planning, PRD, Reports & Checklists (Private)
+# Internal Planning, PRD, Reports (Private)
 AI Workbench Roadmap.md
 AI_Workbench_Hardening.md
 MODELDECK_FINALIZATION.md
 PERFORMANCE_BASELINE.md
-RELEASE_CHECKLIST.md
-RELEASE_NOTES_1.0.0.md
 *报告*.md
 *PRD*.md
 *.md
 !README.md
+!RELEASE_CHECKLIST.md
 !docs/**/*.md

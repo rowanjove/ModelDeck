@@ -51,6 +51,9 @@ jobs:
       - name: Install Frontend Dependencies
         run: npm ci
 
+      - name: Multi-file Version Consistency Check
+        run: npm run check:version
+
       - name: Frontend TypeScript Typecheck
         run: npm run typecheck
 
@@ -99,6 +102,17 @@ jobs:
       - name: Install Frontend Dependencies
         run: npm ci
 
+      - name: Tag and Multi-file Version Alignment Gate
+        shell: pwsh
+        run: |
+          if ("${{ github.ref }}" -like "refs/tags/v*") {
+            $tagVer = "${{ github.ref_name }}".TrimStart('v')
+            Write-Host "Verifying release tag alignment against version $tagVer"
+            node scripts/check-version-consistency.cjs --expected $tagVer
+          } else {
+            node scripts/check-version-consistency.cjs
+          }
+
       - name: Build Frontend Distribution
         run: npm run build
 
@@ -107,22 +121,12 @@ jobs:
         env:
           CI: true
 
-      - name: Generate Checksums & Artifacts
-        shell: pwsh
-        run: |
-          mkdir -p dist-release
-          if (Test-Path "src-tauri/target/release/ModelDeck.exe") {
-            Copy-Item "src-tauri/target/release/ModelDeck.exe" -Destination "dist-release/"
-            $hash = (Get-FileHash -Algorithm SHA256 "dist-release/ModelDeck.exe").Hash
-            "$hash  ModelDeck.exe" | Out-File -Encoding utf8 "dist-release/checksums.sha256"
-            Write-Host "Generated SHA256: $hash"
-          } else {
-            Write-Warning "ModelDeck.exe not found in release target directory."
-          }
+      - name: Finalize Windows Release & Generate Checksums
+        run: node scripts/finalize-release.cjs
 
       - name: Upload Release Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ModelDeck-Windows-Binary
-          path: dist-release/
+          name: ModelDeck-Windows-Release
+          path: dist/windows/
           if-no-files-found: warn

@@ -142,24 +142,36 @@ npm run tauri dev
 ModelDeck 包含严格的前后端自动化测试与代码质量规范：
 
 ```bash
+# 验证多配置文件版本号一致性
+npm run check:version
+
 # 运行前端类型检查与 Lint 扫描
 npm run typecheck
 npm run lint
 
-# 运行前端 22 项自动化单元测试
+# 运行前端 22 项自动化单元测试 (Vitest)
 npm run test
 
-# 运行 Rust 核心后端检查与 118 项集成/单元测试
-cargo check --manifest-path src-tauri/Cargo.toml
+# 运行 Rust 格式规范检查与 Clippy 零警告静态门禁
+cargo fmt --check --manifest-path src-tauri/Cargo.toml
+cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+# 运行 Rust 核心后端 161 项集成与契约测试
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-### 生产打包构建
+### 生产打包构建与发布校验
 
 ```bash
-# 编译前端并构建 Tauri Windows 安装包
-npm run tauri build
+# 1. 编译前端并构建 Tauri 便携版 / 安装包
+npm run tauri build -- --no-bundle   # 生成便携版二进制 (ModelDeck.exe)
+npm run tauri build                 # 生成完整 NSIS/MSI 安装包
+
+# 2. 归档生产发布产物并生成 SHA-256 校验清单
+node scripts/finalize-release.cjs
 ```
+
+完整发布流程与上线自检标准请参阅 [发布清单规范 (RELEASE_CHECKLIST.md)](docs/dev/RELEASE_CHECKLIST.md)。
 
 ---
 

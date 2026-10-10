@@ -484,6 +484,11 @@ async fn send_with(
                     ctx: &ctx,
                     provider_type: provider.provider_type,
                     data_dir: env.data_dir,
+                    workspace_root: None,
+                    allow_trusted_local: cfg!(test)
+                        || std::env::var("MODELDECK_ALLOW_LOCAL_NETWORK")
+                            .map(|v| v == "1")
+                            .unwrap_or(false),
                     flag: &flag,
                     mcp,
                     pool: Some(env.pool),

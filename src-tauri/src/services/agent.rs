@@ -1,6 +1,8 @@
+use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use reqwest::Client;
@@ -27,6 +29,8 @@ pub struct AgentTurn<'a> {
     pub ctx: &'a AdapterContext,
     pub provider_type: ProviderType,
     pub data_dir: &'a Path,
+    pub workspace_root: Option<&'a Path>,
+    pub allow_trusted_local: bool,
     pub flag: &'a AtomicBool,
     pub mcp: Vec<crate::services::mcp::ExposedTool>,
     pub pool: Option<&'a sqlx::SqlitePool>,
@@ -195,6 +199,7 @@ fn tool_turn(log: &ToolLog) -> TextTurn {
 }
 
 async fn run_call(turn: &AgentTurn<'_>, tools: &[ToolSpec], call: &ToolCall) -> ToolLog {
+    let start_time = Instant::now();
     let arguments = clip(&call.arguments, MAX_ARG_CHARS);
     let outcome = if arguments.ends_with('…') && call.arguments.chars().count() > MAX_ARG_CHARS {
         Err("参数过长".to_string())
@@ -203,12 +208,29 @@ async fn run_call(turn: &AgentTurn<'_>, tools: &[ToolSpec], call: &ToolCall) -> 
     } else {
         match args_object(&arguments) {
             Ok(args) => {
+                let mcp_tool = turn.mcp.iter().find(|item| item.name == call.name);
+                let mcp_stable_id = mcp_tool.map(|item| item.stable_id.as_str());
+
                 let effective_level = match turn.pool {
-                    Some(pool) => crate::services::tool_permissions::get_level(pool, &call.name)
-                        .await
+                    Some(pool) => {
+                        let direct =
+                            crate::services::tool_permissions::get_level(pool, &call.name).await;
+                        match direct {
+                            Ok(crate::services::tool_permissions::ToolPermissionLevel::Confirm)
+                                if mcp_stable_id.is_some() =>
+                            {
+                                if let Some(stable_id) = mcp_stable_id {
+                                    crate::services::tool_permissions::get_level(pool, stable_id).await
+                                } else {
+                                    Ok(crate::services::tool_permissions::ToolPermissionLevel::Confirm)
+                                }
+                            }
+                            res => res,
+                        }
                         .map_err(|err| {
                             format!("读取工具「{}」权限失败: {err}，已禁止执行。", call.name)
-                        }),
+                        })
+                    }
                     None => Ok(crate::services::tool_permissions::default_level_for(
                         &call.name,
                     )),
@@ -220,10 +242,19 @@ async fn run_call(turn: &AgentTurn<'_>, tools: &[ToolSpec], call: &ToolCall) -> 
                         format!("工具「{}」权限级别为 Restricted，当前已被禁用。", call.name),
                     ),
                     Ok(crate::services::tool_permissions::ToolPermissionLevel::Confirm) => {
-                        let is_confirmed = turn
-                            .confirmed_tools
-                            .iter()
-                            .any(|t| t == &call.name || t == "*");
+                        let is_high_risk = matches!(
+                            call.name.as_str(),
+                            "run_command" | "delete_file" | "write_file"
+                        );
+                        let is_confirmed = turn.confirmed_tools.iter().any(|t| {
+                            if is_high_risk {
+                                t == &call.name
+                            } else {
+                                t == &call.name
+                                    || t == "*"
+                                    || mcp_stable_id.map_or(false, |id| t == id)
+                            }
+                        });
                         if !is_confirmed {
                             Err(format!(
                                 "⚠️ 工具「{}」属于高风险操作，需要人工确认 (Confirm)。请在前端确认允许执行本次调用，或在工具权限中将其设置为 Safe。",
@@ -253,10 +284,24 @@ async fn run_call(turn: &AgentTurn<'_>, tools: &[ToolSpec], call: &ToolCall) -> 
             Err(message) => Err(message),
         }
     };
-    let (ok, result) = match outcome {
-        Ok(text) => (true, clip(&text, MAX_RESULT_CHARS)),
-        Err(message) => (false, clip(&message, MAX_RESULT_CHARS)),
+    let (ok, result) = match &outcome {
+        Ok(text) => (true, clip(text, MAX_RESULT_CHARS)),
+        Err(message) => (false, clip(message, MAX_RESULT_CHARS)),
     };
+
+    let duration_ms = start_time.elapsed().as_millis();
+    let sanitized_args = sanitize_audit_arguments(&arguments);
+    eprintln!(
+        "[AUDIT_LOG] {}",
+        json!({
+            "type": "agent_tool_audit",
+            "tool": call.name,
+            "ok": ok,
+            "duration_ms": duration_ms,
+            "arguments": sanitized_args
+        })
+    );
+
     ToolLog {
         id: call.id.clone(),
         name: call.name.clone(),
@@ -380,20 +425,23 @@ async fn execute_tool(
         "current_time" => Ok(chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string()),
-        "http_request" => http_request(&turn.ctx.http, timeout, args).await,
-        "read_file" => read_file(turn.data_dir, required(args, "path")?),
+        "http_request" => http_request(timeout, turn.allow_trusted_local, args).await,
+        "read_file" => read_file(turn.workspace_root, turn.data_dir, required(args, "path")?),
         "write_file" => write_file(
+            turn.workspace_root,
             turn.data_dir,
             required(args, "path")?,
             required(args, "content")?,
         ),
-        "delete_file" => delete_file(turn.data_dir, required(args, "path")?),
+        "delete_file" => delete_file(turn.workspace_root, turn.data_dir, required(args, "path")?),
         "run_command" => {
             let command_str = required(args, "command")?;
             let cwd = args.get("cwd").and_then(Value::as_str);
-            run_command(turn.data_dir, command_str, cwd).await
+            run_command(turn.workspace_root, turn.data_dir, command_str, cwd).await
         }
-        "list_directory" => list_directory(turn.data_dir, required(args, "path")?),
+        "list_directory" => {
+            list_directory(turn.workspace_root, turn.data_dir, required(args, "path")?)
+        }
         "memory" => {
             let pool = turn.pool.ok_or_else(|| "数据库连接不可用".to_string())?;
             let action = required(args, "action")?;
@@ -443,9 +491,104 @@ fn required<'a>(args: &'a Map<String, Value>, key: &str) -> Result<&'a str, Stri
         .ok_or_else(|| format!("缺少 {key}"))
 }
 
+fn agent_http_client() -> &'static Client {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("初始化 Agent HTTP 客户端失败")
+    })
+}
+
+fn is_ssrf_blocked_ip(ip: IpAddr, allow_trusted_local: bool) -> Result<(), String> {
+    match ip {
+        IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            if octets[0] == 169 && octets[1] == 254 {
+                return Err(
+                    "安全策略拦截：禁止访问云元数据服务或链路本地地址 (169.254.x.x)".to_string(),
+                );
+            }
+            if v4.is_loopback() {
+                if allow_trusted_local {
+                    return Ok(());
+                } else {
+                    return Err("安全策略拦截：禁止访问本地回环地址 (127.x.x.x)".to_string());
+                }
+            }
+            if v4.is_private() {
+                return Err("安全策略拦截：禁止访问私有局域网网段 (RFC 1918)".to_string());
+            }
+            if octets[0] == 100 && (octets[1] & 0b1100_0000) == 64 {
+                return Err("安全策略拦截：禁止访问运营商级私有网络地址 (100.64.x.x)".to_string());
+            }
+            if v4.is_broadcast() || v4.is_unspecified() {
+                return Err("安全策略拦截：禁止访问广播或未指定地址".to_string());
+            }
+        }
+        IpAddr::V6(v6) => {
+            if v6.is_loopback() {
+                if allow_trusted_local {
+                    return Ok(());
+                } else {
+                    return Err("安全策略拦截：禁止访问本地回环地址 (::1)".to_string());
+                }
+            }
+            if v6.is_unspecified() {
+                return Err("安全策略拦截：禁止访问未指定地址 (::)".to_string());
+            }
+            let segments = v6.segments();
+            if (segments[0] & 0xfe00) == 0xfc00 {
+                return Err("安全策略拦截：禁止访问 IPv6 唯一本地网络 (fc00::/7)".to_string());
+            }
+            if (segments[0] & 0xffc0) == 0xfe80 {
+                return Err("安全策略拦截：禁止访问 IPv6 链路本地地址 (fe80::/10)".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_http_target(url: &reqwest::Url, allow_trusted_local: bool) -> Result<(), String> {
+    let host_str = url.host_str().ok_or_else(|| "网址缺少主机".to_string())?;
+    let lower_host = host_str.to_ascii_lowercase();
+
+    if lower_host == "metadata.google.internal"
+        || lower_host == "instance-data"
+        || lower_host.ends_with(".internal")
+        || lower_host.ends_with(".lan")
+        || lower_host.ends_with(".corp")
+        || lower_host.ends_with(".local")
+    {
+        return Err("安全策略拦截：禁止访问云元数据服务或内网专用域名".to_string());
+    }
+
+    if lower_host == "localhost" {
+        if allow_trusted_local {
+            return Ok(());
+        } else {
+            return Err("安全策略拦截：禁止访问本地 localhost".to_string());
+        }
+    }
+
+    if let Ok(ip) = lower_host.parse::<IpAddr>() {
+        return is_ssrf_blocked_ip(ip, allow_trusted_local);
+    }
+
+    let port = url.port_or_known_default().unwrap_or(80);
+    if let Ok(addrs) = (host_str, port).to_socket_addrs() {
+        for socket_addr in addrs {
+            is_ssrf_blocked_ip(socket_addr.ip(), allow_trusted_local)?;
+        }
+    }
+
+    Ok(())
+}
+
 async fn http_request(
-    http: &Client,
     timeout: Duration,
+    allow_trusted_local: bool,
     args: &Map<String, Value>,
 ) -> Result<String, String> {
     let method = required(args, "method")?.to_ascii_uppercase();
@@ -469,6 +612,9 @@ async fn http_request(
     if parsed.host_str().is_none() {
         return Err("网址缺少主机".to_string());
     }
+
+    validate_http_target(&parsed, allow_trusted_local)?;
+
     let body = args
         .get("body")
         .and_then(Value::as_str)
@@ -482,6 +628,7 @@ async fn http_request(
     }
     let headers = header_pairs(args.get("headers"))?;
     let verb = reqwest::Method::from_bytes(method.as_bytes()).map_err(|_| "请求方法无效")?;
+    let http = agent_http_client();
     let mut request = http.request(verb, parsed).timeout(timeout);
     for (name, value) in headers {
         request = request.header(name, value);
@@ -559,8 +706,8 @@ fn header_pairs(value: Option<&Value>) -> Result<Vec<(String, String)>, String> 
     Ok(headers)
 }
 
-fn read_file(data_dir: &Path, path: &str) -> Result<String, String> {
-    let file = resolve_existing(data_dir, path)?;
+fn read_file(workspace_root: Option<&Path>, data_dir: &Path, path: &str) -> Result<String, String> {
+    let file = resolve_existing_path(workspace_root, data_dir, path)?;
     if !file.is_file() {
         return Err("这不是文件".to_string());
     }
@@ -579,11 +726,16 @@ fn read_file(data_dir: &Path, path: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-fn write_file(data_dir: &Path, path: &str, content: &str) -> Result<String, String> {
+fn write_file(
+    workspace_root: Option<&Path>,
+    data_dir: &Path,
+    path: &str,
+    content: &str,
+) -> Result<String, String> {
     if content.chars().count() > MAX_FILE_BYTES {
         return Err("内容超过 64KB".to_string());
     }
-    let file = resolve_write(data_dir, path)?;
+    let file = resolve_write_path(workspace_root, data_dir, path)?;
     if let Some(ext) = file.extension().and_then(|s| s.to_str()) {
         let ext_lower = ext.to_ascii_lowercase();
         if matches!(
@@ -610,8 +762,12 @@ fn write_file(data_dir: &Path, path: &str, content: &str) -> Result<String, Stri
     Ok("已写入".to_string())
 }
 
-fn delete_file(data_dir: &Path, raw: &str) -> Result<String, String> {
-    let file = resolve_existing(data_dir, raw)?;
+fn delete_file(
+    workspace_root: Option<&Path>,
+    data_dir: &Path,
+    raw: &str,
+) -> Result<String, String> {
+    let file = resolve_existing_path(workspace_root, data_dir, raw)?;
     if !file.is_file() {
         return Err("目标不是常规文件，无法删除".to_string());
     }
@@ -620,6 +776,7 @@ fn delete_file(data_dir: &Path, raw: &str) -> Result<String, String> {
 }
 
 async fn run_command(
+    workspace_root: Option<&Path>,
     data_dir: &Path,
     command_str: &str,
     cwd: Option<&str>,
@@ -644,7 +801,13 @@ async fn run_command(
     }
 
     let run_dir = if let Some(dir_str) = cwd.filter(|s| !s.trim().is_empty()) {
-        resolve_existing(data_dir, dir_str)?
+        let dir = resolve_existing_path(workspace_root, data_dir, dir_str)?;
+        if !dir.is_dir() {
+            return Err("指定的执行目录不是有效目录".to_string());
+        }
+        dir
+    } else if let Some(ws) = workspace_root {
+        std::fs::canonicalize(ws).map_err(|e| format!("无法解析工作区目录: {e}"))?
     } else {
         std::env::current_dir().map_err(|e| format!("无法获取工作目录: {e}"))?
     };
@@ -732,8 +895,12 @@ async fn run_command(
     Ok(result)
 }
 
-fn list_directory(data_dir: &Path, path: &str) -> Result<String, String> {
-    let dir = resolve_existing(data_dir, path)?;
+fn list_directory(
+    workspace_root: Option<&Path>,
+    data_dir: &Path,
+    path: &str,
+) -> Result<String, String> {
+    let dir = resolve_existing_path(workspace_root, data_dir, path)?;
     if !dir.is_dir() {
         return Err("这不是目录".to_string());
     }
@@ -762,35 +929,108 @@ fn list_directory(data_dir: &Path, path: &str) -> Result<String, String> {
     Ok(text)
 }
 
-fn resolve_existing(data_dir: &Path, raw: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(raw.trim());
-    if path.as_os_str().is_empty() {
+fn normalize_path_prefix(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn resolve_existing_path(
+    workspace_root: Option<&Path>,
+    data_dir: &Path,
+    raw: &str,
+) -> Result<PathBuf, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
         return Err("缺少路径".to_string());
     }
-    let full = std::fs::canonicalize(&path).map_err(|err| format!("无法解析路径: {err}"))?;
-    reject_data_dir(data_dir, &full)?;
+    let path = PathBuf::from(raw);
+    let target = match workspace_root {
+        Some(ws) => {
+            if path.is_absolute() {
+                path
+            } else {
+                ws.join(path)
+            }
+        }
+        None => path,
+    };
+    let full = std::fs::canonicalize(&target).map_err(|err| format!("无法解析路径: {err}"))?;
+
+    if let Some(ws) = workspace_root {
+        let ws_canon =
+            std::fs::canonicalize(ws).map_err(|err| format!("无法解析工作区目录: {err}"))?;
+        let full_norm = normalize_path_prefix(&full);
+        let ws_norm = normalize_path_prefix(&ws_canon);
+        if !full_norm.starts_with(&ws_norm) {
+            return Err("安全策略拦截：路径越出受控工作区范围".to_string());
+        }
+    }
+
+    reject_protected_dirs(data_dir, &full)?;
     Ok(full)
 }
 
-fn resolve_write(data_dir: &Path, raw: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(raw.trim());
+fn resolve_write_path(
+    workspace_root: Option<&Path>,
+    data_dir: &Path,
+    raw: &str,
+) -> Result<PathBuf, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("缺少路径".to_string());
+    }
+    let path = PathBuf::from(raw);
     let name = path
         .file_name()
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| "路径无效".to_string())?;
-    reject_data_dir(data_dir, &existing_ancestor(&path))?;
-    let parent = path.parent().filter(|item| !item.as_os_str().is_empty());
-    let parent = match parent {
+        .ok_or_else(|| "路径无效".to_string())?
+        .to_os_string();
+
+    let target = match workspace_root {
+        Some(ws) => {
+            if path.is_absolute() {
+                path
+            } else {
+                ws.join(path)
+            }
+        }
+        None => path,
+    };
+
+    reject_protected_dirs(data_dir, &existing_ancestor(&target))?;
+    let parent = target.parent().filter(|item| !item.as_os_str().is_empty());
+    let parent_dir = match parent {
         Some(parent) => {
             if !parent.exists() {
                 std::fs::create_dir_all(parent).map_err(|err| format!("无法创建目录: {err}"))?;
             }
             std::fs::canonicalize(parent).map_err(|err| format!("无法解析路径: {err}"))?
         }
-        None => std::env::current_dir().map_err(|err| format!("无法解析路径: {err}"))?,
+        None => match workspace_root {
+            Some(ws) => {
+                std::fs::canonicalize(ws).map_err(|err| format!("无法解析工作区目录: {err}"))?
+            }
+            None => std::env::current_dir().map_err(|err| format!("无法解析路径: {err}"))?,
+        },
     };
-    let full = parent.join(name);
-    reject_data_dir(data_dir, &full)?;
+
+    let full = parent_dir.join(name);
+
+    if let Some(ws) = workspace_root {
+        let ws_canon =
+            std::fs::canonicalize(ws).map_err(|err| format!("无法解析工作区目录: {err}"))?;
+        let parent_norm = normalize_path_prefix(&parent_dir);
+        let ws_norm = normalize_path_prefix(&ws_canon);
+        if !parent_norm.starts_with(&ws_norm) {
+            return Err("安全策略拦截：写入目标越出受控工作区范围".to_string());
+        }
+    }
+
+    reject_protected_dirs(data_dir, &full)?;
     Ok(full)
 }
 
@@ -802,22 +1042,60 @@ fn existing_ancestor(path: &Path) -> PathBuf {
     std::fs::canonicalize(&cursor).unwrap_or(cursor)
 }
 
-fn reject_data_dir(data_dir: &Path, path: &Path) -> Result<(), String> {
+fn reject_protected_dirs(data_dir: &Path, path: &Path) -> Result<(), String> {
     let root = std::fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
-    if path.starts_with(&root) {
+    let path_norm = normalize_path_prefix(path);
+    let root_norm = normalize_path_prefix(&root);
+    if path_norm.starts_with(&root_norm) {
         return Err("不能访问应用数据目录".to_string());
     }
-    let path_str = path.to_string_lossy().to_ascii_lowercase();
+    let path_str = path_norm.to_string_lossy().to_ascii_lowercase();
     if path_str.contains("/.ssh")
         || path_str.contains("\\.ssh")
         || path_str.contains("/windows/")
         || path_str.contains("\\windows\\")
         || path_str.contains("start menu/programs/startup")
         || path_str.contains("start menu\\programs\\startup")
+        || path_str.contains("/etc/shadow")
+        || path_str.contains("/etc/passwd")
     {
         return Err("安全策略拦截：禁止访问系统保护或凭据目录".to_string());
     }
     Ok(())
+}
+
+fn sanitize_audit_arguments(args_json: &str) -> String {
+    let Ok(mut val) = serde_json::from_str::<Value>(args_json) else {
+        return clip(args_json, 200);
+    };
+    redact_sensitive_values(&mut val);
+    serde_json::to_string(&val).unwrap_or_else(|_| clip(args_json, 200))
+}
+
+fn redact_sensitive_values(val: &mut Value) {
+    match val {
+        Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                let lower = k.to_ascii_lowercase();
+                if lower.contains("key")
+                    || lower.contains("token")
+                    || lower.contains("secret")
+                    || lower.contains("password")
+                    || lower.contains("auth")
+                {
+                    *v = Value::String("[REDACTED]".to_string());
+                } else {
+                    redact_sensitive_values(v);
+                }
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                redact_sensitive_values(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn clip(text: &str, max_chars: usize) -> String {
@@ -848,18 +1126,194 @@ mod tests {
         std::fs::create_dir_all(&work).unwrap();
         let note = work.join("note.txt");
         assert_eq!(
-            write_file(&data, note.to_str().unwrap(), "hello").unwrap(),
+            write_file(None, &data, note.to_str().unwrap(), "hello").unwrap(),
             "已写入"
         );
-        assert_eq!(read_file(&data, note.to_str().unwrap()).unwrap(), "hello");
-        assert!(list_directory(&data, work.to_str().unwrap())
+        assert_eq!(
+            read_file(None, &data, note.to_str().unwrap()).unwrap(),
+            "hello"
+        );
+        assert!(list_directory(None, &data, work.to_str().unwrap())
             .unwrap()
             .contains("note.txt"));
         let blocked = data.join("secret.txt");
         assert_eq!(
-            write_file(&data, blocked.to_str().unwrap(), "no").unwrap_err(),
+            write_file(None, &data, blocked.to_str().unwrap(), "no").unwrap_err(),
             "不能访问应用数据目录"
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn workspace_root_bounds_and_blocks_traversal() {
+        let root = std::env::temp_dir().join(format!("aiwb-workspace-{}", uuid::Uuid::new_v4()));
+        let data = root.join("data");
+        let ws = root.join("workspace");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        // 1. 在工作区内部正常读写
+        let in_file = ws.join("sub").join("file.txt");
+        assert_eq!(
+            write_file(
+                Some(&ws),
+                &data,
+                in_file.to_str().unwrap(),
+                "content inside"
+            )
+            .unwrap(),
+            "已写入"
+        );
+        assert_eq!(
+            read_file(Some(&ws), &data, in_file.to_str().unwrap()).unwrap(),
+            "content inside"
+        );
+
+        // 2. 尝试向工作区外部写文件 (路径遍历 ../) 必须被拦截
+        let escape_write = ws.join("../outside/escaped.txt");
+        let err_write =
+            write_file(Some(&ws), &data, escape_write.to_str().unwrap(), "leak").unwrap_err();
+        assert!(
+            err_write.contains("越出受控工作区范围"),
+            "Expected workspace escape error, got: {err_write}"
+        );
+
+        // 3. 尝试向工作区外部读文件 (绝对路径越界) 必须被拦截
+        let outside_file = outside.join("secret_external.txt");
+        std::fs::write(&outside_file, "external secret").unwrap();
+        let err_read = read_file(Some(&ws), &data, outside_file.to_str().unwrap()).unwrap_err();
+        assert!(
+            err_read.contains("越出受控工作区范围"),
+            "Expected workspace escape error, got: {err_read}"
+        );
+
+        // 4. 尝试向工作区外部删除文件必须被拦截
+        let err_del = delete_file(Some(&ws), &data, outside_file.to_str().unwrap()).unwrap_err();
+        assert!(
+            err_del.contains("越出受控工作区范围"),
+            "Expected workspace escape error, got: {err_del}"
+        );
+
+        // 5. 尝试列出外部目录必须被拦截
+        let err_list = list_directory(Some(&ws), &data, outside.to_str().unwrap()).unwrap_err();
+        assert!(
+            err_list.contains("越出受控工作区范围"),
+            "Expected workspace escape error, got: {err_list}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ssrf_protection_blocks_cloud_metadata_and_private_networks() {
+        // 1. 云元数据服务 IP 必须拦截
+        let meta_ip: IpAddr = "169.254.169.254".parse().unwrap();
+        assert!(is_ssrf_blocked_ip(meta_ip, false).is_err());
+        assert!(is_ssrf_blocked_ip(meta_ip, true).is_err()); // 即使开启可信本地，元数据也严禁访问
+
+        // 2. 私网 IP 拦截
+        let priv_10: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(is_ssrf_blocked_ip(priv_10, false).is_err());
+        let priv_192: IpAddr = "192.168.1.1".parse().unwrap();
+        assert!(is_ssrf_blocked_ip(priv_192, false).is_err());
+        let priv_172: IpAddr = "172.16.0.1".parse().unwrap();
+        assert!(is_ssrf_blocked_ip(priv_172, false).is_err());
+
+        // 3. 本地回环地址受控例外
+        let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+        assert!(is_ssrf_blocked_ip(loopback, false).is_err());
+        assert!(is_ssrf_blocked_ip(loopback, true).is_ok());
+
+        // 4. 域名级黑名单拦截
+        let meta_url =
+            reqwest::Url::parse("http://metadata.google.internal/computeMetadata/v1").unwrap();
+        assert!(validate_http_target(&meta_url, false).is_err());
+        assert!(validate_http_target(&meta_url, true).is_err());
+
+        let internal_url = reqwest::Url::parse("http://service.corp/api").unwrap();
+        assert!(validate_http_target(&internal_url, false).is_err());
+    }
+
+    #[test]
+    fn audit_log_redaction_sanitizes_credentials() {
+        let sensitive_json = r#"{"tool": "fetch", "api_key": "sk-secret-123456", "nested": {"password": "pwd-secret-999", "token": "token-secret-888"}, "safe": "public"}"#;
+        let sanitized = sanitize_audit_arguments(sensitive_json);
+        assert!(!sanitized.contains("sk-secret-123456"));
+        assert!(!sanitized.contains("pwd-secret-999"));
+        assert!(!sanitized.contains("token-secret-888"));
+        assert!(sanitized.contains("[REDACTED]"));
+        assert!(sanitized.contains("public"));
+    }
+
+    #[tokio::test]
+    async fn wildcard_confirmation_does_not_permit_high_risk_tools() {
+        let flag = AtomicBool::new(false);
+        let provider = crate::domain::ProviderRecord {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            provider_type: ProviderType::OpenaiCompatible,
+            base_url: "http://127.0.0.1:9".to_string(),
+            credential_id: None,
+            headers: std::collections::BTreeMap::new(),
+            timeout_ms: 1000,
+            enabled: true,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let ctx = AdapterContext::new(reqwest::Client::new(), provider, None, None, None, None);
+        let dummy_dir = std::env::temp_dir();
+        let turn = AgentTurn {
+            ctx: &ctx,
+            provider_type: ProviderType::OpenaiCompatible,
+            data_dir: &dummy_dir,
+            workspace_root: None,
+            allow_trusted_local: false,
+            flag: &flag,
+            mcp: Vec::new(),
+            pool: None,
+            // 传入 "*" 泛通配符
+            confirmed_tools: vec!["*".to_string()],
+        };
+        let tools = vec![spec("run_command").unwrap(), spec("read_file").unwrap()];
+
+        // 1. 高危工具 run_command 必须被拦截，不能被 "*" 放行
+        let call_cmd = ToolCall {
+            id: "call_cmd".to_string(),
+            name: "run_command".to_string(),
+            arguments: json!({"command": "echo test"}).to_string(),
+        };
+        let log_cmd = run_call(&turn, &tools, &call_cmd).await;
+        assert!(!log_cmd.ok);
+        assert!(log_cmd.result.contains("属于高风险操作，需要人工确认"));
+
+        // 2. 高危工具 write_file 必须被拦截，不能被 "*" 放行
+        let tools_write = vec![spec("write_file").unwrap()];
+        let call_write = ToolCall {
+            id: "call_write".to_string(),
+            name: "write_file".to_string(),
+            arguments: json!({"path": "test.txt", "content": "leak"}).to_string(),
+        };
+        let log_write = run_call(&turn, &tools_write, &call_write).await;
+        assert!(!log_write.ok);
+        assert!(log_write.result.contains("属于高风险操作，需要人工确认"));
+
+        // 3. 显式确认高危工具后，不再报权限确认拦截
+        let turn_explicit = AgentTurn {
+            ctx: &ctx,
+            provider_type: ProviderType::OpenaiCompatible,
+            data_dir: &dummy_dir,
+            workspace_root: None,
+            allow_trusted_local: false,
+            flag: &flag,
+            mcp: Vec::new(),
+            pool: None,
+            confirmed_tools: vec!["run_command".to_string()],
+        };
+        let log_cmd_explicit = run_call(&turn_explicit, &tools, &call_cmd).await;
+        assert!(!log_cmd_explicit
+            .result
+            .contains("属于高风险操作，需要人工确认"));
     }
 }

@@ -57,6 +57,7 @@ pub struct ExposedTool {
     pub remote: String,
     pub spec: ToolSpec,
     pub server: McpServer,
+    pub stable_id: String,
 }
 
 pub async fn list(pool: &SqlitePool) -> Result<Vec<McpServer>, AppError> {
@@ -176,15 +177,17 @@ pub async fn tools_for_agent(
                 return Err(AppError::validation("启用的 MCP 工具超过 32 个"));
             }
             let name = format!("mcp_{index}_{}", safe_name(&tool.name));
+            let stable_id = format!("{}:{}", server.id, tool.name);
             exposed.push(ExposedTool {
                 spec: ToolSpec {
                     name: name.clone(),
-                    description: format!("{}：{}", server.name, tool.description),
+                    description: format!("[来源: {}] {}", server.name, tool.description),
                     parameters: tool.schema,
                 },
                 name,
                 remote: tool.name,
                 server: server.clone(),
+                stable_id,
             });
         }
     }

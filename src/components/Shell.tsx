@@ -40,6 +40,8 @@ const SettingsView = lazy(() =>
     default: m.SettingsView,
   })),
 );
+import { api } from "../api";
+import { SetupWizardModal } from "../features/setup/SetupWizardModal";
 import {
   useAudioDraft,
   useImageDraft,
@@ -69,6 +71,7 @@ export function Shell() {
   const [videoFresh, setVideoFresh] = useState(0);
   const [audioFresh, setAudioFresh] = useState(0);
   const [switcher, setSwitcher] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
   const reset = useTextDraft((draft) => draft.reset);
   const resetImage = useImageDraft((draft) => draft.reset);
   const resetVideo = useVideoDraft((draft) => draft.reset);
@@ -180,6 +183,27 @@ export function Shell() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
+    // 首次启动且未跳过向导时，检查是否无已配置 Provider
+    const dismissed = localStorage.getItem("modeldeck_setup_wizard_dismissed");
+    if (!dismissed) {
+      void api
+        .providers()
+        .then((list) => {
+          if (list.length === 0) {
+            setShowWizard(true);
+          }
+        })
+        .catch(() => {});
+    }
+
+    function onOpenWizard() {
+      setShowWizard(true);
+    }
+    window.addEventListener("open-setup-wizard", onOpenWizard);
+    return () => window.removeEventListener("open-setup-wizard", onOpenWizard);
   }, []);
 
   return (
@@ -323,6 +347,14 @@ export function Shell() {
         >
           <span>设置</span>
         </button>
+        <button
+          type="button"
+          className="nav-item"
+          onClick={() => setShowWizard(true)}
+          title="运行首次使用配置向导"
+        >
+          <span>🚀 新手向导</span>
+        </button>
       </aside>
       <main className="main">
         <Suspense
@@ -438,6 +470,15 @@ export function Shell() {
           onClose={() => setSwitcher(false)}
           onNavigate={(target) => setRoute(target as Route)}
           onStartNew={startNew}
+        />
+      ) : null}
+      {showWizard ? (
+        <SetupWizardModal
+          onClose={() => setShowWizard(false)}
+          onFinishAndNavigate={(targetRoute) => {
+            setShowWizard(false);
+            setRoute(targetRoute as Route);
+          }}
         />
       ) : null}
     </div>

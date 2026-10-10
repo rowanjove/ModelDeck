@@ -62,6 +62,30 @@ export function SettingsView() {
             系统维护与诊断
           </button>
         </div>
+
+        <div style={{ marginLeft: "auto" }}>
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("open-setup-wizard"))
+            }
+            style={{
+              padding: "6px 12px",
+              borderRadius: "var(--radius-sm)",
+              border: "1px solid var(--line)",
+              background: "var(--surface-1)",
+              fontSize: "13px",
+              color: "var(--ink)",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+            title="重新运行新手配置向导"
+          >
+            <span>🚀</span>
+            <span>重新运行向导</span>
+          </button>
+        </div>
       </header>
 
       <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>

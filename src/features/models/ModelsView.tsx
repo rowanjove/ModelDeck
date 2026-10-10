@@ -197,9 +197,20 @@ export function ModelsView({ onOpenSettings }: { onOpenSettings: () => void }) {
       <section className="page-message">
         <h1>模型</h1>
         <p>先添加 Provider，再为它声明模型能力和参数。</p>
-        <button type="button" className="primary" onClick={onOpenSettings}>
-          去添加 Provider
-        </button>
+        <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+          <button
+            type="button"
+            className="primary"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("open-setup-wizard"))
+            }
+          >
+            🚀 运行配置向导
+          </button>
+          <button type="button" onClick={onOpenSettings}>
+            手动配置 Provider
+          </button>
+        </div>
       </section>
     );
   }

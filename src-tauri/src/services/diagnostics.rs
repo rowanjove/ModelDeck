@@ -301,16 +301,20 @@ pub async fn run_diagnostics(
             let p_type: String = row.try_get("type").unwrap_or_default();
             let cred_id: Option<String> = row.try_get("credential_id").unwrap_or(None);
 
-            if cred_id.is_none() || cred_id.as_deref().unwrap_or("").trim().is_empty() {
-                missing_creds.push(format!("{p_name}({p_type}) 未配置凭据"));
-            } else if let Some(store) = secrets {
-                let cid = cred_id.unwrap();
-                if let Ok(Some(secret)) = store.get(&cid) {
-                    if secret.expose().trim().is_empty() {
-                        missing_creds.push(format!("{p_name}({p_type}) 密钥为空"));
+            match cred_id {
+                Some(cid) if !cid.trim().is_empty() => {
+                    if let Some(store) = secrets {
+                        if let Ok(Some(secret)) = store.get(&cid) {
+                            if secret.expose().trim().is_empty() {
+                                missing_creds.push(format!("{p_name}({p_type}) 密钥为空"));
+                            }
+                        } else {
+                            missing_creds.push(format!("{p_name}({p_type}) 凭据丢失"));
+                        }
                     }
-                } else {
-                    missing_creds.push(format!("{p_name}({p_type}) 凭据丢失"));
+                }
+                _ => {
+                    missing_creds.push(format!("{p_name}({p_type}) 未配置凭据"));
                 }
             }
         }

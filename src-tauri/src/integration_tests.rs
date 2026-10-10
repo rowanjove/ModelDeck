@@ -6347,3 +6347,352 @@ async fn t15_diagnostics_and_network_proxy_test() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+// =========================================================================
+// T16 端到端验收场景 (E2E Acceptance Scenarios A, B, C)
+// =========================================================================
+
+#[tokio::test]
+async fn t16_e2e_scenario_a_first_run_to_first_result() {
+    let dir = std::env::temp_dir().join(format!("ai-e2e-scen-a-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db_path = dir.join("app.db");
+    let pool = db::open(&db_path).await.unwrap();
+    db::migrate(&pool).await.unwrap();
+
+    // 1. 无特权免管理员环境初始化：探测目录权限
+    assert!(crate::storage_util::ensure_dir_writable(&dir).is_ok());
+
+    // 2. 模拟首次向导设置：配置本地/测试 Provider
+    let prov_id = "prov-local-e2e";
+    let cred_id = "cred-local-e2e";
+    sqlx::query(
+        "INSERT INTO providers (id, name, type, base_url, credential_id, headers_json, timeout_ms, enabled, created_at, updated_at)
+         VALUES (?, 'Local E2E Engine', 'ollama', 'http://127.0.0.1:11434', ?, '{}', 30000, 1, '2026-10-10T00:00:00Z', '2026-10-10T00:00:00Z')"
+    )
+    .bind(prov_id)
+    .bind(cred_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 3. 执行第一次图片生成并保存产物
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let image_file = dir.join(format!("{}.png", task_id));
+    std::fs::write(&image_file, b"\x89PNG\r\n\x1a\nfake-e2e-image-bytes").unwrap();
+
+    services::history::record_image_task(
+        &pool,
+        services::history::NewImageTask {
+            id: task_id.clone(),
+            provider_id: prov_id.to_string(),
+            provider_name: "Local E2E Engine".to_string(),
+            model_id: "flux-schnell".to_string(),
+            model_name: "FLUX Schnell".to_string(),
+            model_api_id: "flux-schnell".to_string(),
+            prompt: "A futuristic cyberpunk city at dusk".to_string(),
+            negative_prompt: None,
+            source_image: None,
+            mask: None,
+            reference_images: vec![],
+            extra: None,
+            parameters: serde_json::Map::new(),
+            status: "completed".to_string(),
+            outputs: vec![services::history::StoredOutput {
+                path: image_file.to_string_lossy().to_string(),
+                mime_type: "image/png".to_string(),
+                width: Some(1024),
+                height: Some(1024),
+            }],
+            raw_request: None,
+            raw_response: None,
+            error: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // 4. 关闭并重启应用模拟：检查历史与资产
+    let task_detail = services::history::get(&pool, &task_id).await.unwrap();
+    assert_eq!(task_detail.status, "completed");
+    assert_eq!(task_detail.prompt, "A futuristic cyberpunk city at dusk");
+
+    let assets =
+        services::search::list_asset_library(&pool, Some("image".to_string()), None, None, None)
+            .await
+            .unwrap();
+    assert!(!assets.is_empty());
+    let found_asset = assets
+        .iter()
+        .find(|a| a.task_id == task_id)
+        .expect("Asset should exist");
+    assert!(found_asset.file_exists);
+
+    // 运行自检
+    let report = services::diagnostics::run_diagnostics(&dir, &pool, None)
+        .await
+        .unwrap();
+    assert!(report
+        .items
+        .iter()
+        .any(|i| i.name == "SQLite Integrity" && i.status == "ok"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn t16_e2e_scenario_b_long_video_lifecycle_and_crash_recovery() {
+    let (pool, _secrets, dir) = setup().await;
+
+    // 1. 提交长视频任务并在生成中记录 remote_job_id
+    let task_id_video = uuid::Uuid::new_v4().to_string();
+    services::history::record_video_task(
+        &pool,
+        services::history::NewVideoTask {
+            id: task_id_video.clone(),
+            provider_id: "prov-kling".to_string(),
+            provider_name: "Kling AI".to_string(),
+            model_id: "kling-v1".to_string(),
+            model_name: "Kling 1.0".to_string(),
+            model_api_id: "kling-v1".to_string(),
+            prompt: "Cinematic drone shot of vast snowy mountains".to_string(),
+            negative_prompt: None,
+            first_frame: None,
+            last_frame: None,
+            reference_images: vec![],
+            reference_videos: vec![],
+            reference_audios: vec![],
+            extra: None,
+            parameters: serde_json::Map::new(),
+            status: "running".to_string(),
+            outputs: vec![],
+            raw_request: None,
+            raw_response: None,
+            error: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // 记录远程 Job 状态（模拟生成中异常退出）
+    services::task_scheduler::record_remote_job(
+        &pool,
+        &task_id_video,
+        "kling-remote-job-8888",
+        Some("https://api.klingai.com/v1/videos/kling-remote-job-8888"),
+    )
+    .await
+    .unwrap();
+
+    // 2. 模拟重启恢复执行
+    let report = services::task_scheduler::recover_tasks_on_startup(&pool)
+        .await
+        .unwrap();
+    assert_eq!(report.interrupted_with_remote_id, 1);
+    assert_eq!(report.total_recovered, 1);
+
+    let recovered_task = services::history::get(&pool, &task_id_video).await.unwrap();
+    assert_eq!(recovered_task.status, "interrupted");
+    assert!(recovered_task
+        .error
+        .unwrap()
+        .contains("kling-remote-job-8888"));
+
+    // 验证数据库底层 remote_job_id 完整保留
+    let (saved_remote_id,): (Option<String>,) =
+        sqlx::query_as("SELECT remote_job_id FROM generation_tasks WHERE id = ?")
+            .bind(&task_id_video)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(saved_remote_id.as_deref(), Some("kling-remote-job-8888"));
+
+    // 3. 提交未决任务模拟网络中断与防扣费机制
+    let task_id_submitting = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, input_json, parameters_json, execution_phase, created_at)
+         VALUES (?, 'video', 'prov-kling', 'kling-v1', 'submitting', '{}', '{}', 'submitting', '2026-10-10T00:00:00Z')"
+    )
+    .bind(&task_id_submitting)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let report2 = services::task_scheduler::recover_tasks_on_startup(&pool)
+        .await
+        .unwrap();
+    assert!(report2.unknown_submissions >= 1);
+
+    let submitting_task = services::history::get(&pool, &task_id_submitting)
+        .await
+        .unwrap();
+    assert_eq!(submitting_task.status, "unknown_submission");
+    assert!(submitting_task
+        .error
+        .unwrap()
+        .contains("为防止重复扣费，系统默认不自动重发"));
+
+    // 验证计费风险标识
+    let (billing_risk_val,): (Option<String>,) =
+        sqlx::query_as("SELECT billing_risk FROM generation_tasks WHERE id = ?")
+            .bind(&task_id_submitting)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(billing_risk_val.as_deref(), Some("possible"));
+
+    // 4. 取消一致性测试：活跃任务取消进入 cancelled 终态，重启恢复绝不回退
+    let task_id_cancel = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, input_json, parameters_json, created_at)
+         VALUES (?, 'video', 'prov-kling', 'kling-v1', 'running', '{}', '{}', '2026-10-10T00:00:00Z')"
+    )
+    .bind(&task_id_cancel)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let was_cancelled = services::history::mark_task_cancelled(&pool, &task_id_cancel)
+        .await
+        .unwrap();
+    assert!(was_cancelled);
+    let cancelled_task = services::history::get(&pool, &task_id_cancel)
+        .await
+        .unwrap();
+    assert_eq!(cancelled_task.status, "cancelled");
+
+    // 再次调用重启恢复，已取消任务绝不变回 running 或 queued
+    let report3 = services::task_scheduler::recover_tasks_on_startup(&pool)
+        .await
+        .unwrap();
+    assert_eq!(report3.total_recovered, 0);
+
+    let check_again = services::history::get(&pool, &task_id_cancel)
+        .await
+        .unwrap();
+    assert_eq!(check_again.status, "cancelled");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn t16_e2e_scenario_c_cross_modal_workflow_provenance_and_reuse() {
+    let (pool, _secrets, dir) = setup().await;
+
+    // 1. 模拟三阶段跨模态流程（文本策划 -> 图像分镜 -> 视频驱动）
+    let story_task_id = "step1-text-story";
+    let image_task_id = "step2-image-frame";
+    let video_task_id = "step3-video-clip";
+
+    // Step 1: 文本分镜脚本
+    let recorded_story_id = services::history::record_text_task(
+        &pool,
+        &dir,
+        services::history::NewTextTask {
+            kind: "text".to_string(),
+            provider_id: "prov-llm".to_string(),
+            provider_name: "LLM".to_string(),
+            model_id: "gpt-4o".to_string(),
+            model_name: "GPT-4o".to_string(),
+            model_api_id: "gpt-4o".to_string(),
+            prompt: format!("任务 [{}] 编写关于深海探险的分镜脚本", story_task_id),
+            system_prompt: None,
+            images: vec![],
+            extra: None,
+            conversation_id: None,
+            parameters: serde_json::Map::new(),
+            status: "completed".to_string(),
+            output_text: Some("Scene 1: 一艘深潜器在发光的深海珊瑚丛中穿行。".to_string()),
+            raw_request: None,
+            raw_response: None,
+            error: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!recorded_story_id.is_empty());
+
+    // Step 2: 图像关键帧生成并登记资产
+    let frame_file = dir.join("subsea_frame.png");
+    std::fs::write(&frame_file, b"fake-subsea-keyframe-png").unwrap();
+    let image_asset_id = "asset-keyframe-001";
+
+    sqlx::query(
+        "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, input_json, parameters_json, created_at)
+         VALUES (?, 'image', 'prov-img', 'dall-e-3', 'completed', '{}', '{}', '2026-10-10T00:00:00Z')"
+    )
+    .bind(image_task_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO assets (id, task_id, type, path, mime_type, width, height, metadata_json, created_at)
+         VALUES (?, ?, 'image', ?, 'image/png', 1920, 1080, '{\"source_step\":\"storyboard\"}', '2026-10-10T00:00:00Z')"
+    )
+    .bind(image_asset_id)
+    .bind(image_task_id)
+    .bind(frame_file.to_string_lossy().to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Step 3: 首帧驱动视频生成并登记资产
+    let video_file = dir.join("subsea_clip.mp4");
+    std::fs::write(&video_file, b"fake-subsea-video-mp4").unwrap();
+    let video_asset_id = "asset-video-001";
+
+    sqlx::query(
+        "INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, input_json, parameters_json, created_at)
+         VALUES (?, 'video', 'prov-vid', 'runway-gen3', 'completed', '{}', '{}', '2026-10-10T00:00:00Z')"
+    )
+    .bind(video_task_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO assets (id, task_id, type, path, mime_type, width, height, duration_ms, metadata_json, created_at)
+         VALUES (?, ?, 'video', ?, 'video/mp4', 1920, 1080, 5000, '{\"first_frame_asset\":\"asset-keyframe-001\"}', '2026-10-10T00:00:00Z')"
+    )
+    .bind(video_asset_id)
+    .bind(video_task_id)
+    .bind(video_file.to_string_lossy().to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 2. 验证全链路资产在统一资产库可索引且来源可溯
+    let all_assets = services::search::list_asset_library(&pool, None, None, None, None)
+        .await
+        .unwrap();
+    assert!(all_assets.len() >= 2);
+
+    let keyframe_item = all_assets.iter().find(|a| a.asset_type == "image").unwrap();
+    assert_eq!(keyframe_item.task_id, image_task_id);
+    assert!(keyframe_item.file_exists);
+
+    let video_item = all_assets.iter().find(|a| a.asset_type == "video").unwrap();
+    assert_eq!(video_item.task_id, video_task_id);
+    assert!(video_item.file_exists);
+
+    // 3. 验证变量插值严格校验契约
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("step1_script".to_string(), "Scene 1: Subsea".to_string());
+    vars.insert(
+        "step2_image_path".to_string(),
+        frame_file.to_string_lossy().to_string(),
+    );
+
+    let template = "Generate video with frame {{step2_image_path}} and prompt {{step1_script}}";
+    let substituted =
+        services::pipeline::substitute_vars_strict(template, &vars, "Step 3 Video").unwrap();
+    assert!(substituted.contains("subsea_frame.png"));
+    assert!(substituted.contains("Scene 1: Subsea"));
+
+    // 验证拼写错误变量被严格拦截拒绝，避免用户盲目扣费
+    let bad_template = "Generate video with {{unknown_variable}}";
+    assert!(services::pipeline::substitute_vars_strict(bad_template, &vars, "Step 3 Bad").is_err());
+
+    let _ = std::fs::remove_dir_all(dir);
+}

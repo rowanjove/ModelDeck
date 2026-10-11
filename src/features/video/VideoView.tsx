@@ -442,8 +442,10 @@ export function VideoView({
     <section className="workspace" ref={workspaceRef}>
       <header className="topbar">
         <div>
-          <p className="eyebrow">Video</p>
-          <h1>视频生成</h1>
+          <p className="eyebrow" style={{ margin: 0 }}>
+            Video Studio
+          </p>
+          <h1 style={{ margin: 0, fontSize: "18px" }}>视频生成</h1>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           <button

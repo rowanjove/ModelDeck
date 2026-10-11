@@ -330,7 +330,12 @@ export function ModelsView({ onOpenSettings }: { onOpenSettings: () => void }) {
     <section className="catalog">
       <div className="catalog-list">
         <header>
-          <h1>模型</h1>
+          <div>
+            <p className="eyebrow" style={{ margin: 0 }}>
+              Models & Registry
+            </p>
+            <h1 style={{ margin: 0, fontSize: "18px" }}>模型配置</h1>
+          </div>
           <div className="inline-actions">
             <button
               type="button"

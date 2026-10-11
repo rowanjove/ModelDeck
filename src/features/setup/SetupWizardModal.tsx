@@ -149,6 +149,9 @@ export function SetupWizardModal({
 }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [dontRemindAgain, setDontRemindAgain] = useState(
+    () => localStorage.getItem("modeldeck_setup_wizard_never_remind") === "1",
+  );
 
   // 步骤 1：用途
   const [purpose, setPurpose] = useState<SetupPurpose>("chat");
@@ -414,6 +417,11 @@ export function SetupWizardModal({
 
   // 完成并离开
   function handleDismiss() {
+    if (dontRemindAgain) {
+      localStorage.setItem("modeldeck_setup_wizard_never_remind", "1");
+    } else {
+      localStorage.removeItem("modeldeck_setup_wizard_never_remind");
+    }
     localStorage.setItem("modeldeck_setup_wizard_dismissed", "1");
     onClose();
   }
@@ -502,22 +510,51 @@ export function SetupWizardModal({
               {step === 4 && "配置已就绪，可直接进入对应工作区开始使用。"}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleDismiss}
+          <div
             style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--muted)",
-              fontSize: "13px",
-              cursor: "pointer",
-              padding: "4px 8px",
-              borderRadius: "4px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-end",
+              gap: "4px",
             }}
-            title="跳过向导，稍后可随时在设置中重新运行"
           >
-            以后再设置 (跳过)
-          </button>
+            <button
+              type="button"
+              onClick={handleDismiss}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--muted)",
+                fontSize: "13px",
+                cursor: "pointer",
+                padding: "4px 8px",
+                borderRadius: "4px",
+              }}
+              title="跳过向导，稍后可随时在设置中重新运行"
+            >
+              以后再设置 (跳过)
+            </button>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                fontSize: "12px",
+                color: "var(--soft)",
+                cursor: "pointer",
+                userSelect: "none",
+                paddingRight: "6px",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={dontRemindAgain}
+                onChange={(e) => setDontRemindAgain(e.target.checked)}
+                style={{ cursor: "pointer" }}
+              />
+              以后不再提醒
+            </label>
+          </div>
         </header>
 
         {/* 步骤内容区域 */}

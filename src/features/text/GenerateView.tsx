@@ -315,11 +315,22 @@ export function GenerateView({
   return (
     <section className="workspace" ref={workspaceRef}>
       <header className="topbar">
-        <div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "16px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <p className="eyebrow" style={{ margin: 0 }}>
+              Text / Generate
+            </p>
+            <h1 style={{ margin: 0, fontSize: "18px" }}>文本生成</h1>
+          </div>
           <ModeSwitch onShowChat={onShowChat} onShowCompare={onShowCompare} />
-          <p className="eyebrow">Text / Generate</p>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <h1 style={{ margin: 0 }}>文本生成</h1>
             <button
               type="button"
               className={isBatch ? "primary" : ""}

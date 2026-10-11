@@ -381,8 +381,10 @@ export function AudioView({
     <section className="workspace" ref={workspaceRef}>
       <header className="topbar">
         <div>
-          <p className="eyebrow">Audio</p>
-          <h1>音频生成</h1>
+          <p className="eyebrow" style={{ margin: 0 }}>
+            Audio Studio
+          </p>
+          <h1 style={{ margin: 0, fontSize: "18px" }}>音频生成</h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <button

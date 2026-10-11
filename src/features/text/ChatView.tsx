@@ -646,6 +646,12 @@ export function ChatView({
   return (
     <section className="chat" ref={workspaceRef}>
       <aside className="chat-list">
+        <div style={{ padding: "0 0 6px 0" }}>
+          <p className="eyebrow" style={{ margin: 0 }}>
+            Text / Chat
+          </p>
+          <h1 style={{ margin: 0, fontSize: "18px" }}>智能对话</h1>
+        </div>
         <ModeSwitch
           onShowGenerate={onShowGenerate}
           onShowCompare={onShowCompare}

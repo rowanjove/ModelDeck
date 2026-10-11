@@ -88,14 +88,17 @@ export function UnifiedSearchView({
         height: "100%",
         padding: "20px 24px",
         overflowY: "auto",
-        background: "var(--bg, #0f1117)",
+        background: "var(--bg)",
       }}
     >
       {/* Header bar */}
       <div style={{ marginBottom: "18px" }}>
-        <h2 style={{ margin: "0 0 6px", fontSize: "16px", fontWeight: 700 }}>
-          全局聚合检索 (Unified Search)
-        </h2>
+        <p className="eyebrow" style={{ margin: 0 }}>
+          History & Search
+        </p>
+        <h1 style={{ margin: "0 0 4px", fontSize: "18px", fontWeight: 700 }}>
+          全局聚合检索
+        </h1>
         <p className="muted" style={{ margin: 0, fontSize: "12.5px" }}>
           跨越对话记录、媒体素材、生成任务、模型定义与工作流，全文字段毫秒级多维搜索。
         </p>
@@ -112,9 +115,9 @@ export function UnifiedSearchView({
           style={{
             flex: 1,
             padding: "10px 14px",
-            background: "var(--surface-1, #161922)",
+            background: "var(--surface-1)",
             color: "var(--ink)",
-            border: "1px solid var(--border, #2d3139)",
+            border: "1px solid var(--border)",
             borderRadius: "6px",
             fontSize: "14px",
             outline: "none",
@@ -126,9 +129,9 @@ export function UnifiedSearchView({
             onClick={() => setQuery("")}
             style={{
               padding: "8px 14px",
-              background: "var(--surface-2, #212631)",
-              color: "var(--fg, #e1e4ea)",
-              border: "1px solid var(--border, #2d3139)",
+              background: "var(--surface-2)",
+              color: "var(--ink)",
+              border: "1px solid var(--border)",
               borderRadius: "6px",
               cursor: "pointer",
             }}
@@ -145,7 +148,7 @@ export function UnifiedSearchView({
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: "16px",
-          borderBottom: "1px solid var(--border, #2d3139)",
+          borderBottom: "1px solid var(--border)",
           paddingBottom: "10px",
           gap: "12px",
           flexWrap: "wrap",
@@ -170,9 +173,12 @@ export function UnifiedSearchView({
                 border: "none",
                 background:
                   category === cat.id
-                    ? "var(--accent, #3b82f6)"
+                    ? "var(--accent, #0e6b4f)"
                     : "transparent",
-                color: category === cat.id ? "#fff" : "var(--muted, #8b949e)",
+                color:
+                  category === cat.id
+                    ? "var(--accent-ink)"
+                    : "var(--muted, #71717a)",
                 cursor: "pointer",
                 fontWeight: 600,
                 fontSize: "12px",
@@ -201,10 +207,9 @@ export function UnifiedSearchView({
                 borderRadius: "4px",
                 border: "1px solid var(--border, #2d3139)",
                 background:
-                  modality === mod.id
-                    ? "rgba(255,255,255,0.12)"
-                    : "transparent",
-                color: modality === mod.id ? "#fff" : "var(--muted, #8b949e)",
+                  modality === mod.id ? "var(--sunken)" : "transparent",
+                color:
+                  modality === mod.id ? "var(--ink)" : "var(--muted, #8b949e)",
                 cursor: "pointer",
                 fontSize: "11px",
               }}

@@ -186,17 +186,28 @@ export function Shell() {
   }, []);
 
   useEffect(() => {
-    // 首次启动且未跳过向导时，检查是否无已配置 Provider
-    const dismissed = localStorage.getItem("modeldeck_setup_wizard_dismissed");
-    if (!dismissed) {
+    // 检查是否勾选了“以后不再提醒”
+    const neverRemind =
+      localStorage.getItem("modeldeck_setup_wizard_never_remind") === "1";
+    if (!neverRemind) {
+      // 只要没配置模型每次启动都会弹向导页，配置至少一个模型后不弹
       void api
-        .providers()
+        .models()
         .then((list) => {
           if (list.length === 0) {
             setShowWizard(true);
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          void api
+            .providers()
+            .then((plist) => {
+              if (plist.length === 0) {
+                setShowWizard(true);
+              }
+            })
+            .catch(() => {});
+        });
     }
 
     function onOpenWizard() {
@@ -324,14 +335,6 @@ export function Shell() {
           onClick={() => setRoute("settings")}
         >
           <span>设置</span>
-        </button>
-        <button
-          type="button"
-          className="nav-item"
-          onClick={() => setShowWizard(true)}
-          title="运行首次使用配置向导"
-        >
-          <span>🚀 新手向导</span>
         </button>
       </aside>
       <main className="main">

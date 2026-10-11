@@ -79,11 +79,12 @@ export function SettingsView() {
               display: "flex",
               alignItems: "center",
               gap: "6px",
+              cursor: "pointer",
             }}
-            title="重新运行新手配置向导"
+            title="运行首次使用配置向导"
           >
             <span>🚀</span>
-            <span>重新运行向导</span>
+            <span>新手向导</span>
           </button>
         </div>
       </header>

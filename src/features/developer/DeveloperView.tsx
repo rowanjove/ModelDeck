@@ -53,6 +53,7 @@ export function DeveloperView() {
   const [error, setError] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [showPresets, setShowPresets] = useState(true);
 
   // Queries
   const providersQuery = useQuery<Provider[]>({
@@ -273,188 +274,191 @@ export function DeveloperView() {
       }}
     >
       {/* 1. Left Presets Sidebar */}
-      <div
-        style={{
-          width: "260px",
-          minWidth: "260px",
-          borderRight: "1px solid var(--border, #2d3139)",
-          display: "flex",
-          flexDirection: "column",
-          background: "var(--surface-1, #161922)",
-        }}
-      >
+      {showPresets && (
         <div
           style={{
-            padding: "14px 16px",
-            borderBottom: "1px solid var(--border, #2d3139)",
+            width: "230px",
+            minWidth: "230px",
+            borderRight: "1px solid var(--border, #2d3139)",
             display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            flexDirection: "column",
+            background: "var(--surface-1, #161922)",
+            flexShrink: 0,
           }}
         >
-          <div style={{ fontWeight: 600, fontSize: "14px" }}>API 预设库</div>
-          <button
-            onClick={resetBlank}
-            title="新建空白请求"
-            style={{
-              padding: "4px 8px",
-              fontSize: "12px",
-              background: "var(--accent, #3b82f6)",
-              color: "var(--accent-ink)",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-            }}
-          >
-            + 新建
-          </button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "10px 8px" }}>
-          {/* Default Templates Section */}
           <div
             style={{
-              fontSize: "11px",
-              color: "var(--muted, #8b949e)",
-              textTransform: "uppercase",
-              padding: "6px 8px",
-              fontWeight: 600,
+              padding: "14px 16px",
+              borderBottom: "1px solid var(--border, #2d3139)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
             }}
           >
-            内置标准模板
+            <div style={{ fontWeight: 600, fontSize: "14px" }}>API 预设库</div>
+            <button
+              onClick={resetBlank}
+              title="新建空白请求"
+              style={{
+                padding: "4px 8px",
+                fontSize: "12px",
+                background: "var(--accent, #3b82f6)",
+                color: "var(--accent-ink)",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
+            >
+              + 新建
+            </button>
           </div>
-          {presets
-            .filter((p) => p.id.startsWith("preset-"))
-            .map((p) => (
-              <div
-                key={p.id}
-                onClick={() => loadPreset(p)}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                  marginBottom: "4px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  background:
-                    currentPresetId === p.id
-                      ? "rgba(59, 130, 246, 0.15)"
-                      : "transparent",
-                  border:
-                    currentPresetId === p.id
-                      ? "1px solid rgba(59, 130, 246, 0.4)"
-                      : "1px solid transparent",
-                }}
-              >
-                <div
-                  style={{
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "10px",
-                      fontWeight: 700,
-                      marginRight: "6px",
-                      padding: "2px 4px",
-                      borderRadius: "3px",
-                      background: p.method === "POST" ? "#1e3a8a" : "#065f46",
-                      color: p.method === "POST" ? "#93c5fd" : "#6ee7b7",
-                    }}
-                  >
-                    {p.method}
-                  </span>
-                  <span style={{ fontSize: "12px" }}>{p.name}</span>
-                </div>
-              </div>
-            ))}
 
-          {/* Custom Presets Section */}
-          <div
-            style={{
-              fontSize: "11px",
-              color: "var(--muted, #8b949e)",
-              textTransform: "uppercase",
-              padding: "12px 8px 6px",
-              fontWeight: 600,
-            }}
-          >
-            我的自定义预设 (
-            {presets.filter((p) => !p.id.startsWith("preset-")).length})
-          </div>
-          {presets
-            .filter((p) => !p.id.startsWith("preset-"))
-            .map((p) => (
-              <div
-                key={p.id}
-                onClick={() => loadPreset(p)}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                  marginBottom: "4px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  background:
-                    currentPresetId === p.id
-                      ? "rgba(59, 130, 246, 0.15)"
-                      : "transparent",
-                  border:
-                    currentPresetId === p.id
-                      ? "1px solid rgba(59, 130, 246, 0.4)"
-                      : "1px solid transparent",
-                }}
-              >
+          <div style={{ flex: 1, overflowY: "auto", padding: "10px 8px" }}>
+            {/* Default Templates Section */}
+            <div
+              style={{
+                fontSize: "11px",
+                color: "var(--muted, #8b949e)",
+                textTransform: "uppercase",
+                padding: "6px 8px",
+                fontWeight: 600,
+              }}
+            >
+              内置标准模板
+            </div>
+            {presets
+              .filter((p) => p.id.startsWith("preset-"))
+              .map((p) => (
                 <div
+                  key={p.id}
+                  onClick={() => loadPreset(p)}
                   style={{
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    flex: 1,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "10px",
-                      fontWeight: 700,
-                      marginRight: "6px",
-                      padding: "2px 4px",
-                      borderRadius: "3px",
-                      background: p.method === "POST" ? "#1e3a8a" : "#065f46",
-                      color: p.method === "POST" ? "#93c5fd" : "#6ee7b7",
-                    }}
-                  >
-                    {p.method}
-                  </span>
-                  <span style={{ fontSize: "12px" }}>{p.name}</span>
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (confirm(`确定删除预设 "${p.name}" 吗？`)) {
-                      deletePresetMutation.mutate(p.id);
-                    }
-                  }}
-                  title="删除预设"
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "var(--muted, #8b949e)",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
                     cursor: "pointer",
-                    padding: "2px 4px",
-                    fontSize: "12px",
+                    marginBottom: "4px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    background:
+                      currentPresetId === p.id
+                        ? "rgba(59, 130, 246, 0.15)"
+                        : "transparent",
+                    border:
+                      currentPresetId === p.id
+                        ? "1px solid rgba(59, 130, 246, 0.4)"
+                        : "1px solid transparent",
                   }}
                 >
-                  ✕
-                </button>
-              </div>
-            ))}
+                  <div
+                    style={{
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        marginRight: "6px",
+                        padding: "2px 4px",
+                        borderRadius: "3px",
+                        background: p.method === "POST" ? "#1e3a8a" : "#065f46",
+                        color: p.method === "POST" ? "#93c5fd" : "#6ee7b7",
+                      }}
+                    >
+                      {p.method}
+                    </span>
+                    <span style={{ fontSize: "12px" }}>{p.name}</span>
+                  </div>
+                </div>
+              ))}
+
+            {/* Custom Presets Section */}
+            <div
+              style={{
+                fontSize: "11px",
+                color: "var(--muted, #8b949e)",
+                textTransform: "uppercase",
+                padding: "12px 8px 6px",
+                fontWeight: 600,
+              }}
+            >
+              我的自定义预设 (
+              {presets.filter((p) => !p.id.startsWith("preset-")).length})
+            </div>
+            {presets
+              .filter((p) => !p.id.startsWith("preset-"))
+              .map((p) => (
+                <div
+                  key={p.id}
+                  onClick={() => loadPreset(p)}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    marginBottom: "4px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    background:
+                      currentPresetId === p.id
+                        ? "rgba(59, 130, 246, 0.15)"
+                        : "transparent",
+                    border:
+                      currentPresetId === p.id
+                        ? "1px solid rgba(59, 130, 246, 0.4)"
+                        : "1px solid transparent",
+                  }}
+                >
+                  <div
+                    style={{
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      flex: 1,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        marginRight: "6px",
+                        padding: "2px 4px",
+                        borderRadius: "3px",
+                        background: p.method === "POST" ? "#1e3a8a" : "#065f46",
+                        color: p.method === "POST" ? "#93c5fd" : "#6ee7b7",
+                      }}
+                    >
+                      {p.method}
+                    </span>
+                    <span style={{ fontSize: "12px" }}>{p.name}</span>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`确定删除预设 "${p.name}" 吗？`)) {
+                        deletePresetMutation.mutate(p.id);
+                      }
+                    }}
+                    title="删除预设"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--muted, #8b949e)",
+                      cursor: "pointer",
+                      padding: "2px 4px",
+                      fontSize: "12px",
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 2. Main Work Area (Composer + Inspector) */}
       <div
@@ -476,14 +480,33 @@ export function DeveloperView() {
             background: "var(--surface-1, #161922)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "16px", fontWeight: 700 }}>
-              🛠️ AI API 调试器
-            </span>
-            <span style={{ fontSize: "12px", color: "var(--muted, #8b949e)" }}>
-              Postman 风格 API 调试 · SSE 流式观察 · 厂商 Auth/Header 自动注入 ·
-              cURL 导出
-            </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <button
+              type="button"
+              onClick={() => setShowPresets(!showPresets)}
+              title={showPresets ? "收起预设列表" : "展开预设列表"}
+              style={{
+                padding: "4px 8px",
+                borderRadius: "4px",
+                border: "1px solid var(--border, #2d3139)",
+                background: "var(--surface-2, #212631)",
+                color: "var(--ink)",
+                fontSize: "12px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+              }}
+            >
+              <span>{showPresets ? "◀" : "▶"}</span>
+              <span>预设库</span>
+            </button>
+            <div>
+              <p className="eyebrow" style={{ margin: 0 }}>
+                API Debugger
+              </p>
+              <h1 style={{ margin: 0, fontSize: "18px" }}>API 调试器</h1>
+            </div>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -508,9 +531,9 @@ export function DeveloperView() {
               }}
               style={{
                 padding: "6px 12px",
-                background: "var(--surface-2, #212631)",
-                color: "var(--fg, #e1e4ea)",
-                border: "1px solid var(--border, #2d3139)",
+                background: "var(--surface-2)",
+                color: "var(--ink)",
+                border: "1px solid var(--border)",
                 borderRadius: "4px",
                 cursor: "pointer",
               }}
@@ -523,12 +546,13 @@ export function DeveloperView() {
         {/* URL / Method / Provider Action Bar */}
         <div
           style={{
-            padding: "12px 18px",
+            padding: "10px 18px",
             borderBottom: "1px solid var(--border, #2d3139)",
             display: "flex",
             alignItems: "center",
-            gap: "10px",
+            gap: "8px",
             background: "var(--surface-2, #1c202c)",
+            flexWrap: "wrap",
           }}
         >
           {/* Method selector */}
@@ -536,7 +560,7 @@ export function DeveloperView() {
             value={method}
             onChange={(e) => setMethod(e.target.value)}
             style={{
-              padding: "8px 12px",
+              padding: "8px 10px",
               fontWeight: 700,
               background:
                 method === "POST"
@@ -549,6 +573,7 @@ export function DeveloperView() {
               borderRadius: "4px",
               cursor: "pointer",
               outline: "none",
+              flexShrink: 0,
             }}
           >
             <option value="GET">GET</option>
@@ -562,16 +587,18 @@ export function DeveloperView() {
             value={providerId}
             onChange={(e) => setProviderId(e.target.value)}
             style={{
-              padding: "8px 12px",
+              padding: "8px 10px",
               background: "var(--surface-1, #161922)",
-              color: "var(--fg, #e1e4ea)",
+              color: "var(--ink)",
               border: "1px solid var(--border, #2d3139)",
               borderRadius: "4px",
               outline: "none",
-              maxWidth: "200px",
+              width: "150px",
+              minWidth: "120px",
+              flexShrink: 0,
             }}
           >
-            <option value="">(直连 / 完整 URL 模式)</option>
+            <option value="">直连 (完整URL)</option>
             {providers.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} ({p.type})
@@ -586,14 +613,15 @@ export function DeveloperView() {
             onChange={(e) => setUrl(e.target.value)}
             placeholder={
               providerId
-                ? "输入相对路径 (例如 /v1/chat/completions 或 /v1/models)"
-                : "输入完整 URL (例如 https://api.openai.com/v1/chat/completions)"
+                ? "相对路径 (如 /v1/chat/completions)"
+                : "完整 URL (如 https://api.openai.com/v1/chat/completions)"
             }
             style={{
               flex: 1,
+              minWidth: "160px",
               padding: "8px 12px",
               background: "var(--surface-1, #161922)",
-              color: "var(--fg, #e1e4ea)",
+              color: "var(--ink)",
               border: "1px solid var(--border, #2d3139)",
               borderRadius: "4px",
               outline: "none",
@@ -606,10 +634,10 @@ export function DeveloperView() {
             onClick={() => sendMutation.mutate()}
             disabled={sendMutation.isPending || !url.trim()}
             style={{
-              padding: "8px 22px",
+              padding: "8px 18px",
               background: sendMutation.isPending
                 ? "#4b5563"
-                : "var(--accent, #3b82f6)",
+                : "var(--accent, #0e6b4f)",
               color: "var(--accent-ink)",
               fontWeight: 600,
               border: "none",
@@ -618,9 +646,11 @@ export function DeveloperView() {
                 sendMutation.isPending || !url.trim()
                   ? "not-allowed"
                   : "pointer",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
             }}
           >
-            {sendMutation.isPending ? "请求中..." : "🚀 发送 (Send)"}
+            {sendMutation.isPending ? "请求中..." : "🚀 发送"}
           </button>
         </div>
 
@@ -684,11 +714,11 @@ export function DeveloperView() {
                     border: "none",
                     borderBottom:
                       activeReqSubTab === "body"
-                        ? "2px solid #3b82f6"
+                        ? "2px solid var(--accent, #0e6b4f)"
                         : "2px solid transparent",
                     color:
                       activeReqSubTab === "body"
-                        ? "#fff"
+                        ? "var(--ink, #18181b)"
                         : "var(--muted, #8b949e)",
                     fontWeight: 600,
                     cursor: "pointer",
@@ -704,11 +734,11 @@ export function DeveloperView() {
                     border: "none",
                     borderBottom:
                       activeReqSubTab === "headers"
-                        ? "2px solid #3b82f6"
+                        ? "2px solid var(--accent, #0e6b4f)"
                         : "2px solid transparent",
                     color:
                       activeReqSubTab === "headers"
-                        ? "#fff"
+                        ? "var(--ink, #18181b)"
                         : "var(--muted, #8b949e)",
                     fontWeight: 600,
                     cursor: "pointer",
@@ -725,9 +755,9 @@ export function DeveloperView() {
                     style={{
                       padding: "4px 8px",
                       fontSize: "12px",
-                      background: "var(--surface-2, #212631)",
-                      color: "var(--fg, #e1e4ea)",
-                      border: "1px solid var(--border, #2d3139)",
+                      background: "var(--surface-2)",
+                      color: "var(--ink)",
+                      border: "1px solid var(--border)",
                       borderRadius: "4px",
                       cursor: "pointer",
                     }}
@@ -739,9 +769,9 @@ export function DeveloperView() {
                     style={{
                       padding: "4px 8px",
                       fontSize: "12px",
-                      background: "var(--surface-2, #212631)",
-                      color: "var(--fg, #e1e4ea)",
-                      border: "1px solid var(--border, #2d3139)",
+                      background: "var(--surface-2)",
+                      color: "var(--ink)",
+                      border: "1px solid var(--border)",
                       borderRadius: "4px",
                       cursor: "pointer",
                     }}
@@ -757,7 +787,7 @@ export function DeveloperView() {
                   style={{
                     padding: "4px 8px",
                     fontSize: "12px",
-                    background: "var(--accent, #3b82f6)",
+                    background: "var(--accent, #0e6b4f)",
                     color: "var(--accent-ink)",
                     border: "none",
                     borderRadius: "4px",
@@ -964,11 +994,11 @@ export function DeveloperView() {
                     border: "none",
                     borderBottom:
                       activeRespTab === "body"
-                        ? "2px solid #3b82f6"
+                        ? "2px solid var(--accent, #0e6b4f)"
                         : "2px solid transparent",
                     color:
                       activeRespTab === "body"
-                        ? "#fff"
+                        ? "var(--ink, #18181b)"
                         : "var(--muted, #8b949e)",
                     fontWeight: 600,
                     cursor: "pointer",
@@ -984,11 +1014,11 @@ export function DeveloperView() {
                     border: "none",
                     borderBottom:
                       activeRespTab === "sse"
-                        ? "2px solid #3b82f6"
+                        ? "2px solid var(--accent, #0e6b4f)"
                         : "2px solid transparent",
                     color:
                       activeRespTab === "sse"
-                        ? "#fff"
+                        ? "var(--ink, #18181b)"
                         : "var(--muted, #8b949e)",
                     fontWeight: 600,
                     cursor: "pointer",
@@ -1019,11 +1049,11 @@ export function DeveloperView() {
                     border: "none",
                     borderBottom:
                       activeRespTab === "headers"
-                        ? "2px solid #3b82f6"
+                        ? "2px solid var(--accent, #0e6b4f)"
                         : "2px solid transparent",
                     color:
                       activeRespTab === "headers"
-                        ? "#fff"
+                        ? "var(--ink, #18181b)"
                         : "var(--muted, #8b949e)",
                     fontWeight: 600,
                     cursor: "pointer",
@@ -1039,17 +1069,17 @@ export function DeveloperView() {
                     border: "none",
                     borderBottom:
                       activeRespTab === "curl"
-                        ? "2px solid #3b82f6"
+                        ? "2px solid var(--accent, #0e6b4f)"
                         : "2px solid transparent",
                     color:
                       activeRespTab === "curl"
-                        ? "#fff"
+                        ? "var(--ink, #18181b)"
                         : "var(--muted, #8b949e)",
                     fontWeight: 600,
                     cursor: "pointer",
                   }}
                 >
-                  cURL
+                  cURL 命令
                 </button>
               </div>
 
@@ -1307,7 +1337,7 @@ export function DeveloperView() {
                               fontFamily: "monospace",
                               whiteSpace: "pre-wrap",
                               wordBreak: "break-all",
-                              color: "#f3f4f6",
+                              color: "var(--ink)",
                               fontSize: "11px",
                             }}
                           >
@@ -1355,7 +1385,7 @@ export function DeveloperView() {
                           <td
                             style={{
                               padding: "6px 8px",
-                              color: "#93c5fd",
+                              color: "var(--accent, #0e6b4f)",
                               fontWeight: 600,
                             }}
                           >
@@ -1364,7 +1394,7 @@ export function DeveloperView() {
                           <td
                             style={{
                               padding: "6px 8px",
-                              color: "var(--fg, #e1e4ea)",
+                              color: "var(--ink)",
                               wordBreak: "break-all",
                             }}
                           >
@@ -1400,7 +1430,7 @@ export function DeveloperView() {
                       style={{
                         padding: "3px 8px",
                         fontSize: "11px",
-                        background: "var(--accent, #3b82f6)",
+                        background: "var(--accent, #0e6b4f)",
                         color: "var(--accent-ink)",
                         border: "none",
                         borderRadius: "4px",
@@ -1416,7 +1446,7 @@ export function DeveloperView() {
                       margin: 0,
                       padding: "10px",
                       background: "var(--surface-2, #1c202c)",
-                      color: "#93c5fd",
+                      color: "var(--ink)",
                       border: "1px solid var(--border, #2d3139)",
                       borderRadius: "4px",
                       fontFamily: "monospace",
@@ -1510,9 +1540,9 @@ export function DeveloperView() {
                 onClick={() => setSaveModalOpen(false)}
                 style={{
                   padding: "6px 14px",
-                  background: "var(--surface-2, #212631)",
-                  color: "var(--fg, #e1e4ea)",
-                  border: "1px solid var(--border, #2d3139)",
+                  background: "var(--surface-2)",
+                  color: "var(--ink)",
+                  border: "1px solid var(--border)",
                   borderRadius: "4px",
                   cursor: "pointer",
                 }}
@@ -1528,7 +1558,7 @@ export function DeveloperView() {
                 disabled={!presetName.trim()}
                 style={{
                   padding: "6px 16px",
-                  background: "var(--accent, #3b82f6)",
+                  background: "var(--accent, #0e6b4f)",
                   color: "var(--accent-ink)",
                   border: "none",
                   borderRadius: "4px",

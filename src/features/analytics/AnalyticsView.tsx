@@ -98,9 +98,9 @@ export function AnalyticsView() {
       >
         <div>
           <p className="eyebrow" style={{ margin: 0 }}>
-            Phase 11 · Local Usage & Cost
+            Usage & Analytics
           </p>
-          <h1 style={{ margin: 0, fontSize: "18px" }}>📊 本地用量与成本分析</h1>
+          <h1 style={{ margin: 0, fontSize: "18px" }}>用量与成本分析</h1>
         </div>
 
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>

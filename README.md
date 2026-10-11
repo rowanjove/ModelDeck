@@ -87,6 +87,14 @@
 > 多节点流程编排与 ComfyUI 模板绑定，一键执行复杂串联生成任务。
 ![Workflow Pipeline](docs/screenshots/workflow.png)
 
+### 🔍 全局聚合检索 (Unified Search)
+> 跨越对话历史、媒体素材、任务队列与模型定义，全文毫秒级多维检索。
+![Unified Search](docs/screenshots/history-search.png)
+
+### 🛠️ API 调试器 (API Debugger)
+> 专用 AI API 调试与原型验证套件，支持自动注入 Provider 凭据、SSE 流式解析、cURL 导出与预设管理。
+![API Debugger](docs/screenshots/api-debugger.png)
+
 ### ⚙️ 模型配置与安全权限 (Models & Permissions)
 > 统一管理云端 API 与本地端点，配合细粒度的 Agent 工具调用沙箱安全拦截。
 ![Model Management](docs/screenshots/model-management.png)

@@ -387,8 +387,10 @@ export function ImageView({
     <section className="workspace" ref={workspaceRef}>
       <header className="topbar">
         <div>
-          <p className="eyebrow">Image</p>
-          <h1>图像生成</h1>
+          <p className="eyebrow" style={{ margin: 0 }}>
+            Image Studio
+          </p>
+          <h1 style={{ margin: 0, fontSize: "18px" }}>图像生成</h1>
         </div>
         <label className="model-pick">
           <span>模型</span>

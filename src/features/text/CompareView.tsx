@@ -116,7 +116,20 @@ export function CompareView({
   return (
     <section className="generate" style={{ overflowY: "auto" }}>
       <header className="topbar">
-        <div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "16px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <p className="eyebrow" style={{ margin: 0 }}>
+              Text / Compare
+            </p>
+            <h1 style={{ margin: 0, fontSize: "18px" }}>多模型对比</h1>
+          </div>
           <div className="mode-switch">
             <button type="button" aria-pressed={false} onClick={onShowGenerate}>
               生成
@@ -128,8 +141,6 @@ export function CompareView({
               多模型对比
             </button>
           </div>
-          <p className="eyebrow">Text / Compare</p>
-          <h1>多模型并发对比</h1>
         </div>
       </header>
 

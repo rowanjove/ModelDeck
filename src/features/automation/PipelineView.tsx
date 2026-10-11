@@ -402,9 +402,9 @@ export function PipelineView({
       >
         <div>
           <p className="eyebrow" style={{ margin: 0 }}>
-            Phase 9 · Multi-Modal Pipeline
+            Workflow Pipeline
           </p>
-          <h1 style={{ margin: 0, fontSize: "18px" }}> 自动化工作流与管线</h1>
+          <h1 style={{ margin: 0, fontSize: "18px" }}>工作流编排</h1>
         </div>
 
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>

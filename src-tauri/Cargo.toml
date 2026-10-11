@@ -44,3 +44,9 @@ wiremock = "0.6"
 [profile.release]
 opt-level = 3
 panic = "abort"
+
+# Keep the large application crate within Windows compiler memory limits.
+# Dependencies retain the release optimization level above.
+[profile.release.package.ai-workbench]
+opt-level = 1
+codegen-units = 256

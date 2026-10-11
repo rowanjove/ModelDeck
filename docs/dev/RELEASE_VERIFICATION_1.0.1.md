@@ -6,7 +6,7 @@
 
 备份文件覆盖、重启后的永久排队、Provider 地址变更沿用旧密钥、工具确认参数与执行次数边界、旧安装器归档、版本锁文件同步。
 
-保留当前工作树对 Cargo release profile 的调整：`opt-level = 3`、`panic = "abort"`，未恢复原来的 LTO/codegen-units/strip 设置。
+保留当前工作树 release profile 的 `opt-level = 3`、`panic = "abort"`，未恢复原来的 LTO/strip 设置。首次完整发布编译出现 LLVM 内存不足；为完成构建，仅对主程序包增加 `opt-level = 1`、`codegen-units = 256` 的覆盖，依赖仍使用优化级别 3，构建并发限制为 1。该调整影响编译与性能优化，不改变功能配置；没有以性能基准证明与原优化级别的等价性。
 
 ## 验证
 

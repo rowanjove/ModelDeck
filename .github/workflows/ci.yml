@@ -38,9 +38,10 @@ jobs:
           node-version: 20
           cache: "npm"
 
-      - name: Setup Rust stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup verified Rust 1.93.1 toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.93.1"
           components: rustfmt, clippy
 
       - name: Rust Cache
@@ -91,8 +92,10 @@ jobs:
           node-version: 20
           cache: "npm"
 
-      - name: Setup Rust stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup verified Rust 1.93.1 toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2

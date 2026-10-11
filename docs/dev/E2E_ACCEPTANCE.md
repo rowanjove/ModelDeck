@@ -1,5 +1,7 @@
 # ModelDeck v1.0.1 端到端验收报告 (E2E Acceptance Report)
 
+> **2026-10-11 发布核验更正**：下文属于历史验收记录，不能作为本次真实服务商生成或完整桌面端到端验收的证据。本次以 [RELEASE_VERIFICATION_1.0.1.md](RELEASE_VERIFICATION_1.0.1.md) 记录的实际命令与打包冒烟为准。WireMock、内存数据库和前端契约测试不证明真实生成、安装器运行或 GUI 渲染成功。重启后的未提交排队任务现标记为 `interrupted`，需用户手动重新发起。
+
 > **发布门禁状态 (Release Gate)**：**PASSED (全部通过)**  
 > **基准版本**：`v1.0.0` → `v1.0.1` (`fix/v1.0.1-stabilization`)  
 > **测试环境**：Windows 11 x64 (Build 22631), Node.js v20.18.0, Rust 1.83.0 (MSVC), WebView2 Runtime 131.x  

@@ -42,6 +42,8 @@ fs.mkdirSync(portableDir, { recursive: true });
 // 1. Copy exe
 fs.copyFileSync(srcExe, portableExe);
 fs.copyFileSync(srcExe, path.join(portableDir, 'ModelDeck.exe'));
+fs.writeFileSync(path.join(portableDir, 'README.txt'),
+  `ModelDeck ${version} - Windows x64\n\n运行 ModelDeck.exe。需要 Microsoft Edge WebView2 Runtime。\n数据保存在 %APPDATA%\\local.modeldeck；更换程序文件不会迁移或删除数据。\n升级前建议备份应用数据目录。API 密钥使用 Windows 系统凭据库。\n`, 'utf8');
 
 // 2. Zip folder via PowerShell Compress-Archive
 console.log(`Compressing portable package (${portableZipName})...`);

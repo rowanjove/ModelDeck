@@ -70,9 +70,13 @@ pub async fn update(
     input: ProviderInput,
 ) -> Result<Provider, AppError> {
     let existing = db::get_provider(pool, id).await?;
-    let prepared = prepare(input)?;
+    let mut prepared = prepare(input)?;
     if prepared.clear_api_key && prepared.api_key.is_some() {
         return Err(AppError::validation("不能同时移除并设置 API Key"));
+    }
+    // A changed endpoint must never silently inherit the previous endpoint's key.
+    if existing.base_url != prepared.base_url && prepared.api_key.is_none() {
+        prepared.clear_api_key = true;
     }
     let previous_secret = existing
         .credential_id
@@ -303,4 +307,101 @@ fn clean_models_path(path: Option<String>) -> Result<Option<String>, AppError> {
     }
     validate_rel_path(&path, "modelsPath")?;
     Ok(Some(path))
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+    use crate::credentials::MemorySecretStore;
+
+    fn input(url: &str, key: Option<&str>) -> ProviderInput {
+        ProviderInput {
+            name: "Release test".to_string(),
+            provider_type: ProviderType::OpenaiCompatible,
+            base_url: url.to_string(),
+            api_key: key.map(str::to_string),
+            clear_api_key: false,
+            headers: BTreeMap::new(),
+            timeout_ms: 1000,
+            enabled: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn endpoint_changes_detach_old_keys_and_failed_updates_restore_them() {
+        let dir = std::env::temp_dir().join(format!("modeldeck-provider-{}", Uuid::new_v4()));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let pool = db::open(&dir.join("app.db")).await.unwrap();
+        db::migrate(&pool).await.unwrap();
+        let secrets = MemorySecretStore::default();
+        let provider = create(
+            &pool,
+            &secrets,
+            input("https://old.example/v1", Some("old-secret")),
+        )
+        .await
+        .unwrap();
+        let same = update(
+            &pool,
+            &secrets,
+            &provider.id,
+            input("https://old.example/v1", None),
+        )
+        .await
+        .unwrap();
+        assert!(same.has_credential);
+
+        sqlx::raw_sql("CREATE TRIGGER block_provider_update BEFORE UPDATE ON providers BEGIN SELECT RAISE(ABORT, 'injected update failure'); END;")
+            .execute(&pool).await.unwrap();
+        assert!(update(
+            &pool,
+            &secrets,
+            &provider.id,
+            input("https://new.example/v1", None)
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            secrets.get(&provider.id).unwrap().unwrap().expose(),
+            "old-secret"
+        );
+        assert_eq!(
+            db::get_provider(&pool, &provider.id)
+                .await
+                .unwrap()
+                .base_url,
+            "https://old.example/v1"
+        );
+        sqlx::raw_sql("DROP TRIGGER block_provider_update")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let changed = update(
+            &pool,
+            &secrets,
+            &provider.id,
+            input("https://new.example/v1", None),
+        )
+        .await
+        .unwrap();
+        assert!(!changed.has_credential);
+        assert!(secrets.get(&provider.id).unwrap().is_none());
+        let explicit = update(
+            &pool,
+            &secrets,
+            &provider.id,
+            input("https://third.example/v1", Some("new-secret")),
+        )
+        .await
+        .unwrap();
+        assert!(explicit.has_credential);
+        assert_eq!(
+            secrets.get(&provider.id).unwrap().unwrap().expose(),
+            "new-secret"
+        );
+        pool.close().await;
+        // SQLite worker handles can take a moment to close on Windows.
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
 }

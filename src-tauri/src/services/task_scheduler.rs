@@ -306,7 +306,7 @@ pub async fn update_task_status(
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryReport {
     pub total_recovered: usize,
-    pub queued_retained: usize,
+    pub interrupted_queued: usize,
     pub unknown_submissions: usize,
     pub interrupted_with_remote_id: usize,
     pub interrupted_unrecoverable: usize,
@@ -366,7 +366,7 @@ pub async fn recover_tasks_on_startup(pool: &SqlitePool) -> Result<RecoveryRepor
 
     // 1. 本地队列检查 (status IN ('claimed', 'queued'))：
     // 未向服务商发起请求。如果任务已被用户取消，保持/标记为 cancelled；
-    // 如果仍然有效，则安全保持/重置为 queued，execution_phase = 'queued', billing_risk = 'none'，error = NULL。
+    // 内存中的执行 future 无法跨进程恢复，必须收敛为 interrupted，避免永久排队。
     let _ = sqlx::query(
         "UPDATE generation_tasks
          SET status = 'cancelled', execution_phase = 'cancelled', billing_risk = 'none', completed_at = ?
@@ -379,13 +379,15 @@ pub async fn recover_tasks_on_startup(pool: &SqlitePool) -> Result<RecoveryRepor
 
     let queued_res = sqlx::query(
         "UPDATE generation_tasks
-         SET status = 'queued', execution_phase = 'queued', billing_risk = 'none', error = NULL
+         SET status = 'interrupted', execution_phase = 'interrupted_before_submission', billing_risk = 'none',
+             error = '应用退出时任务尚未提交，排队已中断。请手动重新发起任务。', completed_at = ?, retryable = 1
          WHERE status IN ('claimed', 'queued') AND status != 'cancelled'",
     )
+    .bind(&now)
     .execute(&mut *tx)
     .await
     .map_err(AppError::db)?;
-    report.queued_retained = queued_res.rows_affected() as usize;
+    report.interrupted_queued = queued_res.rows_affected() as usize;
 
     // 2. 已发出请求但尚未收到远端任务 ID ('submitting' 且 remote_job_id IS NULL)
     // 标记为 unknown_submission，默认不自动重发，防止二次扣费
@@ -464,7 +466,7 @@ pub async fn recover_tasks_on_startup(pool: &SqlitePool) -> Result<RecoveryRepor
 
     tx.commit().await.map_err(AppError::db)?;
 
-    report.total_recovered = report.queued_retained
+    report.total_recovered = report.interrupted_queued
         + report.unknown_submissions
         + report.interrupted_with_remote_id
         + report.interrupted_downloads
@@ -499,9 +501,9 @@ mod tests {
         .unwrap();
 
         let report = recover_tasks_on_startup(&pool).await.unwrap();
-        assert_eq!(report.queued_retained, 1);
+        assert_eq!(report.interrupted_queued, 1);
 
-        // 验证最终状态：安全保留排队，无计费风险，无错误
+        // 无执行 future 的队列任务必须成为终态，并提示用户手动重新发起。
         let row = sqlx::query("SELECT status, execution_phase, billing_risk, error FROM generation_tasks WHERE id = 'task_queued_1'")
             .fetch_one(&pool).await.unwrap();
         let status: String = row.get("status");
@@ -509,10 +511,33 @@ mod tests {
         let billing_risk: Option<String> = row.get("billing_risk");
         let error: Option<String> = row.get("error");
 
-        assert_eq!(status, "queued");
-        assert_eq!(phase.as_deref(), Some("queued"));
+        assert_eq!(status, "interrupted");
+        assert_eq!(phase.as_deref(), Some("interrupted_before_submission"));
         assert_eq!(billing_risk.as_deref(), Some("none"));
-        assert!(error.is_none());
+        assert!(error.unwrap().contains("尚未提交"));
+        assert_eq!(
+            recover_tasks_on_startup(&pool)
+                .await
+                .unwrap()
+                .total_recovered,
+            0
+        );
+
+        sqlx::query("INSERT INTO generation_tasks (id, modality, provider_id, model_id, status, input_json, parameters_json, created_at) VALUES ('task_claimed_1', 'video', 'prov1', 'model1', 'claimed', '{}', '{}', ?)")
+            .bind(&now).execute(&pool).await.unwrap();
+        assert_eq!(
+            recover_tasks_on_startup(&pool)
+                .await
+                .unwrap()
+                .interrupted_queued,
+            1
+        );
+        let claimed_status: String =
+            sqlx::query_scalar("SELECT status FROM generation_tasks WHERE id = 'task_claimed_1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(claimed_status, "interrupted");
     }
 
     #[tokio::test]
@@ -648,7 +673,8 @@ mod tests {
 
         // 第二次重复打开应用
         let report2 = recover_tasks_on_startup(&pool).await.unwrap();
-        // t1 依然排队，其他已处于终态 (unknown_submission, interrupted, completed)
+        // 所有遗留任务都已收敛到终态，重复恢复不应再修改任务。
+        assert_eq!(report2.total_recovered, 0);
         assert_eq!(report2.unknown_submissions, 0);
         assert_eq!(report2.interrupted_with_remote_id, 0);
         assert_eq!(report2.interrupted_downloads, 0);

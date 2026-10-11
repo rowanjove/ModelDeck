@@ -117,7 +117,7 @@ jobs:
         run: npm run build
 
       - name: Build Tauri Desktop Bundle
-        run: npx @tauri-apps/cli build --no-bundle
+        run: npx @tauri-apps/cli build --bundles nsis msi --ci --no-sign
         env:
           CI: true
 
@@ -129,4 +129,4 @@ jobs:
         with:
           name: ModelDeck-Windows-Release
           path: dist/windows/
-          if-no-files-found: warn
+          if-no-files-found: error

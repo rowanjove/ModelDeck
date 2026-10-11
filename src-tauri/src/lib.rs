@@ -32,7 +32,16 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let dir = app.path().app_data_dir()?;
+            let dir = match std::env::var_os("MODELDECK_SMOKE_DATA_DIR") {
+                Some(value) => {
+                    let path = std::path::PathBuf::from(value);
+                    if !path.is_absolute() {
+                        return Err("MODELDECK_SMOKE_DATA_DIR must be an absolute path".into());
+                    }
+                    path
+                }
+                None => app.path().app_data_dir()?,
+            };
             let app_state = tauri::async_runtime::block_on(state::AppState::initialize(&dir))?;
             let handle = app.handle().clone();
             let emitter: crate::services::job_queue::EventSender = std::sync::Arc::new(

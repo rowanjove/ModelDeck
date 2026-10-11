@@ -1,6 +1,6 @@
 [package]
 name = "ai-workbench"
-version = "1.0.0"
+version = "1.0.1"
 description = "Local-first multimodal AI workbench"
 edition = "2021"
 
@@ -42,8 +42,5 @@ keyring = { version = "3", features = ["sync-secret-service"] }
 wiremock = "0.6"
 
 [profile.release]
-codegen-units = 1
-lto = true
 opt-level = 3
 panic = "abort"
-strip = true

@@ -1167,10 +1167,14 @@ export function ChatView({
               <ToolLogs
                 logs={message.toolLogs ?? []}
                 limited={message.maxStepsHit}
-                onConfirmTool={(toolName) => {
+                onConfirmTool={(log) => {
+                  const confirmation = encodeToolConfirmation(log);
+                  if (!confirmation) {
+                    return;
+                  }
                   void onSend({
-                    prompt: `已确认授权工具「${toolName}」执行，请继续。`,
-                    confirmedTools: [toolName],
+                    prompt: `已确认授权工具「${log.name}」按原参数执行一次，请继续。`,
+                    confirmedTools: [confirmation],
                   });
                 }}
                 onSetToolSafe={async (toolName) => {
@@ -1181,7 +1185,6 @@ export function ChatView({
                     });
                     void onSend({
                       prompt: `已将工具「${toolName}」权限设为 Safe，请继续执行。`,
-                      confirmedTools: [toolName],
                     });
                   } catch (e) {
                     setError(asAppError(e));
@@ -1485,7 +1488,7 @@ function ToolLogs({
 }: {
   logs: ToolLog[];
   limited?: boolean;
-  onConfirmTool?: (toolName: string) => void;
+  onConfirmTool?: (log: ToolLog) => void;
   onSetToolSafe?: (toolName: string) => void;
 }) {
   if (logs.length === 0 && !limited) {
@@ -1532,7 +1535,7 @@ function ToolLogs({
                     fontWeight: 600,
                   }}
                 >
-                  待人工确认高风险操作:
+                  待人工确认 (Confirm):
                 </span>
                 {onConfirmTool && (
                   <button
@@ -1543,24 +1546,25 @@ function ToolLogs({
                       padding: "3px 8px",
                       cursor: "pointer",
                     }}
-                    onClick={() => onConfirmTool(log.name)}
+                    onClick={() => onConfirmTool(log)}
                   >
                     授权执行一次
                   </button>
                 )}
-                {onSetToolSafe && (
-                  <button
-                    type="button"
-                    style={{
-                      fontSize: "11px",
-                      padding: "3px 8px",
-                      cursor: "pointer",
-                    }}
-                    onClick={() => onSetToolSafe(log.name)}
-                  >
-                    设为 Safe 永久允许
-                  </button>
-                )}
+                {onSetToolSafe &&
+                  !["read_file", "list_directory"].includes(log.name) && (
+                    <button
+                      type="button"
+                      style={{
+                        fontSize: "11px",
+                        padding: "3px 8px",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => onSetToolSafe(log.name)}
+                    >
+                      设为 Safe 永久允许
+                    </button>
+                  )}
               </div>
             )}
           </details>
@@ -1568,6 +1572,22 @@ function ToolLogs({
       })}
     </div>
   );
+}
+
+function encodeToolConfirmation(log: ToolLog): string | null {
+  try {
+    const argumentsValue: unknown = JSON.parse(log.arguments || "{}");
+    if (
+      argumentsValue === null ||
+      typeof argumentsValue !== "object" ||
+      Array.isArray(argumentsValue)
+    ) {
+      return null;
+    }
+    return JSON.stringify({ name: log.name, arguments: argumentsValue });
+  } catch {
+    return null;
+  }
 }
 
 function ModeSwitch({

@@ -519,6 +519,11 @@ export function ProvidersView() {
               </label>
             </div>
             {editor.hasCredential ? (
+              <p className="muted">
+                修改 Base URL 后请重新输入 API Key；未输入时会移除旧密钥绑定。
+              </p>
+            ) : null}
+            {editor.hasCredential ? (
               <button
                 type="button"
                 onClick={() =>

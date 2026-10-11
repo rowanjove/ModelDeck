@@ -31,6 +31,17 @@ if (!versionCheck.success) {
 }
 const version = versionCheck.version;
 
+// Validate inputs before replacing the previous archive.
+for (const relative of [
+  'ModelDeck.exe',
+  `bundle/nsis/ModelDeck_${version}_x64-setup.exe`,
+  `bundle/msi/ModelDeck_${version}_x64_en-US.msi`,
+  `bundle/msi/ModelDeck_${version}_x64_zh-CN.msi`,
+]) {
+  const input = path.join(rootDir, 'src-tauri', 'target', 'release', relative);
+  if (!fs.existsSync(input)) throw new Error(`Current-version release input missing: ${input}`);
+}
+
 // 先清空 dist/windows 目录，确保无历史残留
 if (fs.existsSync(distWindowsDir)) {
   fs.rmSync(distWindowsDir, { recursive: true, force: true });
@@ -65,25 +76,13 @@ if (fs.existsSync(currentVersionSetup)) {
   fs.copyFileSync(currentVersionSetup, targetSetup);
   fs.copyFileSync(currentVersionSetup, targetVersionedSetup);
   console.log(`Copied: ${path.basename(currentVersionSetup)} -> ${targetSetup}`);
-} else if (fs.existsSync(nsisBundleDir)) {
-  // fallback: 找最新的 .exe
-  const files = fs.readdirSync(nsisBundleDir).filter(f => f.endsWith('.exe'));
-  const sorted = files.map(f => ({ name: f, time: fs.statSync(path.join(nsisBundleDir, f)).mtimeMs }))
-                      .sort((a, b) => b.time - a.time);
-  if (sorted.length > 0) {
-    fs.copyFileSync(path.join(nsisBundleDir, sorted[0].name), targetSetup);
-    fs.copyFileSync(path.join(nsisBundleDir, sorted[0].name), targetVersionedSetup);
-    console.log(`Copied (latest): ${sorted[0].name} -> ${targetSetup}`);
-  } else {
-    console.warn(`Warning: No NSIS setup found in ${nsisBundleDir}. Continuing with Portable-only.`);
-  }
 } else {
-  console.warn(`Warning: NSIS bundle directory ${nsisBundleDir} not found.`);
+  throw new Error(`Current-version NSIS installer missing: ${currentVersionSetup}. Build with --bundles nsis msi first.`);
 }
 
 // 3. Optional MSI: 复制当前版本的 MSI 文件
 if (fs.existsSync(msiBundleDir)) {
-  const msiFiles = fs.readdirSync(msiBundleDir).filter(f => f.includes(version) && f.endsWith('.msi'));
+  const msiFiles = fs.readdirSync(msiBundleDir).filter(f => f.startsWith(`ModelDeck_${version}_x64_`) && f.endsWith('.msi'));
   for (const f of msiFiles) {
     const srcMsi = path.join(msiBundleDir, f);
     const destMsi = path.join(optionalDir, f);
@@ -119,7 +118,7 @@ function recordFile(p, relativePath) {
       sha256,
       lastModified: stat.mtime.toISOString(),
     });
-    checksumLines.push(`${sha256}  ${path.basename(p)}`);
+    checksumLines.push(`${sha256}  ${path.relative(distWindowsDir, p).replaceAll('\\', '/')}`);
   }
 }
 

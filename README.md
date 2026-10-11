@@ -7,11 +7,11 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue.svg" alt="License"></a>
-  <a href="https://github.com/rowanjove/modeldeck/releases"><img src="https://img.shields.io/badge/Release-v1.0.0-green.svg" alt="Release"></a>
+  <a href="https://github.com/rowanjove/modeldeck/releases"><img src="https://img.shields.io/badge/Release-v1.0.1-green.svg" alt="Release"></a>
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg?logo=windows" alt="Platform">
   <img src="https://img.shields.io/badge/Rust-Tauri%20v2-black.svg?logo=tauri" alt="Tauri v2">
   <img src="https://img.shields.io/badge/Frontend-React%2019%20%2B%20TS-61DAFB.svg?logo=react" alt="React 19">
-  <img src="https://img.shields.io/badge/Tests-118%20Rust%20%2B%2022%20Vitest-success.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-Rust%20%2B%20Vitest-success.svg" alt="Tests">
 </p>
 
 ---
@@ -119,8 +119,8 @@
 ## 🚀 开发者快速上手 (Developer Guide)
 
 ### 环境依赖
-- [Node.js](https://nodejs.org/) (>= 18.0)
-- [Rust](https://www.rust-lang.org/) (>= 1.80) 与 `cargo`
+- [Node.js](https://nodejs.org/) (20.19+ 或 22.12+，本轮使用 24.13.0)
+- [Rust](https://www.rust-lang.org/) 与 `cargo`（本轮使用 1.93.1 / MSVC）
 - Visual Studio C++ 生成工具 (Windows C++ Build Tools)
 
 ### 本地启动
@@ -149,14 +149,14 @@ npm run check:version
 npm run typecheck
 npm run lint
 
-# 运行前端 22 项自动化单元测试 (Vitest)
+# 运行前端自动化单元测试 (Vitest)
 npm run test
 
 # 运行 Rust 格式规范检查与 Clippy 零警告静态门禁
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
 cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
 
-# 运行 Rust 核心后端 161 项集成与契约测试
+# 运行 Rust 核心后端集成与契约测试
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 

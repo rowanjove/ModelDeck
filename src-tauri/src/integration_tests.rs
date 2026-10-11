@@ -2419,7 +2419,11 @@ async fn agent_calls_http_then_answers_and_keeps_the_key_out_of_sqlite() {
     let cancels = Mutex::new(HashMap::new());
     let mut input = chat_turn(&model.id, None, "看一下便签", None);
     input.tools = vec!["http_request".to_string()];
-    input.confirmed_tools = vec!["http_request".to_string()];
+    input.confirmed_tools = vec![json!({
+        "name": "http_request",
+        "arguments": {"method": "GET", "url": note}
+    })
+    .to_string()];
     input.max_steps = Some(4);
     let result = services::chat::send(
         &pool,
@@ -3333,7 +3337,11 @@ async fn mcp_http_tool_is_called_from_the_agent() {
     let cancels = Mutex::new(HashMap::new());
     let mut input = chat_turn(&model.id, None, "用一下工具", None);
     input.tools = vec!["mcp".to_string()];
-    input.confirmed_tools = vec!["*".to_string()];
+    input.confirmed_tools = vec![json!({
+        "name": "mcp_0_echo",
+        "arguments": {}
+    })
+    .to_string()];
     input.max_steps = Some(3);
     let result = services::chat::send(
         &pool,

@@ -687,17 +687,16 @@ pub async fn integrity_check(pool: &SqlitePool) -> Result<Vec<String>, AppError>
 }
 
 pub async fn safe_backup(pool: &SqlitePool, target_path: &Path) -> Result<(), AppError> {
+    // Never delete a user-selected file: the target may be the live database
+    // or another valuable file. VACUUM INTO also rejects nonempty targets.
+    if target_path.exists() {
+        return Err(AppError::storage("备份目标已存在，请选择新的文件名"));
+    }
     if let Some(parent) = target_path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
             .map_err(|e| AppError::storage(format!("无法创建备份目标目录: {e}")))?;
     }
-    if target_path.exists() {
-        tokio::fs::remove_file(target_path)
-            .await
-            .map_err(|e| AppError::storage(format!("无法清理已存在的旧备份文件: {e}")))?;
-    }
-
     // 1. 先执行 TRUNCATE checkpoint，将 WAL 日志页面合并入主库
     let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
         .execute(pool)
@@ -901,5 +900,27 @@ mod tests {
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn test_backup_rejects_existing_targets_without_changing_them() {
+        let temp_dir = std::env::temp_dir().join(format!("ai-wb-backup-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        let db_path = temp_dir.join("live.db");
+        let pool = open(&db_path).await.unwrap();
+        migrate(&pool).await.unwrap();
+        let original_db = tokio::fs::read(&db_path).await.unwrap();
+        assert!(safe_backup(&pool, &db_path).await.is_err());
+        assert_eq!(tokio::fs::read(&db_path).await.unwrap(), original_db);
+        assert_eq!(integrity_check(&pool).await.unwrap(), vec!["ok"]);
+
+        for contents in [b"valuable user data".as_slice(), b"".as_slice()] {
+            let target = temp_dir.join("existing.db");
+            tokio::fs::write(&target, contents).await.unwrap();
+            assert!(safe_backup(&pool, &target).await.is_err());
+            assert_eq!(tokio::fs::read(&target).await.unwrap(), contents);
+        }
+        pool.close().await;
+        tokio::fs::remove_dir_all(&temp_dir).await.unwrap();
     }
 }

@@ -76,7 +76,7 @@ pub fn normalize_steps(enabled: bool, value: Option<u32>) -> Result<u32, AppErro
 }
 
 pub async fn run(
-    turn: AgentTurn<'_>,
+    mut turn: AgentTurn<'_>,
     mut payload: TextPayload,
     tool_names: &[String],
     max_steps: u32,
@@ -124,7 +124,7 @@ pub async fn run(
             if turn.flag.load(Ordering::Relaxed) {
                 return stopped(logs, Some(result));
             }
-            let log = run_call(&turn, &tools, call).await;
+            let log = run_call(&mut turn, &tools, call).await;
             on_event(AgentEvent::Tool(log.clone()));
             payload.turns.push(tool_turn(&log));
             logs.push(log);
@@ -198,7 +198,7 @@ fn tool_turn(log: &ToolLog) -> TextTurn {
     }
 }
 
-async fn run_call(turn: &AgentTurn<'_>, tools: &[ToolSpec], call: &ToolCall) -> ToolLog {
+async fn run_call(turn: &mut AgentTurn<'_>, tools: &[ToolSpec], call: &ToolCall) -> ToolLog {
     let start_time = Instant::now();
     let arguments = clip(&call.arguments, MAX_ARG_CHARS);
     let outcome = if arguments.ends_with('…') && call.arguments.chars().count() > MAX_ARG_CHARS {
@@ -236,29 +236,35 @@ async fn run_call(turn: &AgentTurn<'_>, tools: &[ToolSpec], call: &ToolCall) -> 
                     )),
                 };
 
+                let effective_level = effective_level.map(|level| {
+                    if turn.workspace_root.is_none()
+                        && matches!(call.name.as_str(), "read_file" | "list_directory")
+                        && level == crate::services::tool_permissions::ToolPermissionLevel::Safe
+                    {
+                        crate::services::tool_permissions::ToolPermissionLevel::Confirm
+                    } else {
+                        level
+                    }
+                });
+
                 match effective_level {
                     Err(err_msg) => Err(err_msg),
                     Ok(crate::services::tool_permissions::ToolPermissionLevel::Restricted) => Err(
                         format!("工具「{}」权限级别为 Restricted，当前已被禁用。", call.name),
                     ),
                     Ok(crate::services::tool_permissions::ToolPermissionLevel::Confirm) => {
-                        let is_high_risk = matches!(
-                            call.name.as_str(),
-                            "run_command" | "delete_file" | "write_file"
-                        );
-                        let is_confirmed = turn.confirmed_tools.iter().any(|t| {
-                            if is_high_risk {
-                                t == &call.name
-                            } else {
-                                t == &call.name
-                                    || t == "*"
-                                    || mcp_stable_id.is_some_and(|id| t == id)
-                            }
-                        });
+                        let is_confirmed = consume_confirmation(turn, &call.name, &args);
                         if !is_confirmed {
+                            let hint = if turn.workspace_root.is_none()
+                                && matches!(call.name.as_str(), "read_file" | "list_directory")
+                            {
+                                "未选择受控工作区，文件读取与目录浏览必须逐次确认。"
+                            } else {
+                                "请确认本次调用，或在工具权限中将其设置为 Safe。"
+                            };
                             Err(format!(
-                                "⚠️ 工具「{}」属于高风险操作，需要人工确认 (Confirm)。请在前端确认允许执行本次调用，或在工具权限中将其设置为 Safe。",
-                                call.name
+                                "⚠️ 工具「{}」需要人工确认 (Confirm)。{}",
+                                call.name, hint
                             ))
                         } else {
                             execute_tool(
@@ -405,6 +411,29 @@ fn args_object(raw: &str) -> Result<Map<String, Value>, String> {
         .as_object()
         .cloned()
         .ok_or_else(|| "参数不是 JSON 对象".to_string())
+}
+
+fn consume_confirmation(
+    turn: &mut AgentTurn<'_>,
+    tool_name: &str,
+    arguments: &Map<String, Value>,
+) -> bool {
+    let Some(index) = turn.confirmed_tools.iter().position(|token| {
+        let Ok(value) = serde_json::from_str::<Value>(token) else {
+            return false;
+        };
+        let Some(object) = value.as_object() else {
+            return false;
+        };
+        object.len() == 2
+            && object.get("name").and_then(Value::as_str) == Some(tool_name)
+            && object.get("arguments") == Some(&Value::Object(arguments.clone()))
+    }) else {
+        return false;
+    };
+
+    turn.confirmed_tools.remove(index);
+    true
 }
 
 fn tool_timeout(ms: u64) -> Duration {
@@ -1276,7 +1305,11 @@ mod tests {
             // 传入 "*" 泛通配符
             confirmed_tools: vec!["*".to_string()],
         };
-        let tools = vec![spec("run_command").unwrap(), spec("read_file").unwrap()];
+        let tools = vec![
+            spec("run_command").unwrap(),
+            spec("read_file").unwrap(),
+            spec("list_directory").unwrap(),
+        ];
 
         // 1. 高危工具 run_command 必须被拦截，不能被 "*" 放行
         let call_cmd = ToolCall {
@@ -1284,9 +1317,10 @@ mod tests {
             name: "run_command".to_string(),
             arguments: json!({"command": "echo test"}).to_string(),
         };
-        let log_cmd = run_call(&turn, &tools, &call_cmd).await;
+        let mut turn = turn;
+        let log_cmd = run_call(&mut turn, &tools, &call_cmd).await;
         assert!(!log_cmd.ok);
-        assert!(log_cmd.result.contains("属于高风险操作，需要人工确认"));
+        assert!(log_cmd.result.contains("需要人工确认"));
 
         // 2. 高危工具 write_file 必须被拦截，不能被 "*" 放行
         let tools_write = vec![spec("write_file").unwrap()];
@@ -1295,12 +1329,12 @@ mod tests {
             name: "write_file".to_string(),
             arguments: json!({"path": "test.txt", "content": "leak"}).to_string(),
         };
-        let log_write = run_call(&turn, &tools_write, &call_write).await;
+        let log_write = run_call(&mut turn, &tools_write, &call_write).await;
         assert!(!log_write.ok);
-        assert!(log_write.result.contains("属于高风险操作，需要人工确认"));
+        assert!(log_write.result.contains("需要人工确认"));
 
         // 3. 显式确认高危工具后，不再报权限确认拦截
-        let turn_explicit = AgentTurn {
+        let mut turn_explicit = AgentTurn {
             ctx: &ctx,
             provider_type: ProviderType::OpenaiCompatible,
             data_dir: &dummy_dir,
@@ -1309,11 +1343,61 @@ mod tests {
             flag: &flag,
             mcp: Vec::new(),
             pool: None,
-            confirmed_tools: vec!["run_command".to_string()],
+            confirmed_tools: vec![json!({
+                "name": "run_command",
+                "arguments": {"command": "echo test"}
+            })
+            .to_string()],
         };
-        let log_cmd_explicit = run_call(&turn_explicit, &tools, &call_cmd).await;
-        assert!(!log_cmd_explicit
-            .result
-            .contains("属于高风险操作，需要人工确认"));
+        let log_cmd_explicit = run_call(&mut turn_explicit, &tools, &call_cmd).await;
+        assert!(!log_cmd_explicit.result.contains("需要人工确认"));
+
+        // 一次确认只能消费一次，重复调用即使参数完全相同也必须重新确认。
+        let log_cmd_repeated = run_call(&mut turn_explicit, &tools, &call_cmd).await;
+        assert!(log_cmd_repeated.result.contains("需要人工确认"));
+
+        // 确认必须绑定完整参数，参数变化时不能复用。
+        let mut turn_mismatched = AgentTurn {
+            confirmed_tools: vec![json!({
+                "name": "run_command",
+                "arguments": {"command": "echo test"}
+            })
+            .to_string()],
+            ..turn_explicit
+        };
+        let changed_call = ToolCall {
+            id: "call_changed".to_string(),
+            name: "run_command".to_string(),
+            arguments: json!({"command": "echo changed"}).to_string(),
+        };
+        let log_cmd_mismatched = run_call(&mut turn_mismatched, &tools, &changed_call).await;
+        assert!(log_cmd_mismatched.result.contains("需要人工确认"));
+
+        // 无 workspace 时，默认 Safe 的文件读取必须回落到逐次 Confirm。
+        let external_file =
+            dummy_dir.join(format!("agent-confirmation-{}.txt", uuid::Uuid::new_v4()));
+        std::fs::write(&external_file, "protected").unwrap();
+        let read_call = ToolCall {
+            id: "call_read".to_string(),
+            name: "read_file".to_string(),
+            arguments: json!({"path": external_file}).to_string(),
+        };
+        let mut turn_without_confirmation = AgentTurn {
+            confirmed_tools: Vec::new(),
+            ..turn_mismatched
+        };
+        let log_read = run_call(&mut turn_without_confirmation, &tools, &read_call).await;
+        assert!(!log_read.ok);
+        assert!(log_read.result.contains("需要人工确认"));
+
+        let list_call = ToolCall {
+            id: "call_list".to_string(),
+            name: "list_directory".to_string(),
+            arguments: json!({"path": dummy_dir}).to_string(),
+        };
+        let log_list = run_call(&mut turn_without_confirmation, &tools, &list_call).await;
+        assert!(!log_list.ok);
+        assert!(log_list.result.contains("需要人工确认"));
+        let _ = std::fs::remove_file(external_file);
     }
 }

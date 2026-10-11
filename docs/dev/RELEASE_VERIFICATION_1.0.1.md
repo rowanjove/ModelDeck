@@ -45,6 +45,8 @@
 
 产物位于 `release-dist/1.0.1`，SHA-256 见 `SHA256SUMS.txt`。Portable 与本次构建的原始 EXE 哈希一致。实际包体已从临时错误构建的 555.60 MiB 恢复至 12.76 MiB；最终保留优化级别 3。
 
+首次 GitHub CI 在 Biome 阶段因 Windows checkout 转换为 CRLF 而失败；随后添加 `.gitattributes`，统一文本为 LF，二进制资源保持二进制处理。此修复不改变应用逻辑或发布二进制。
+
 ## 边界
 
 - 协议与业务自动化测试基于模拟服务/测试数据库，不证明真实服务商生成成功。

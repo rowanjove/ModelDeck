@@ -5,6 +5,7 @@
     "ignore": [
       "src-tauri",
       "dist",
+      "release-dist",
       "node_modules",
       "public",
       "*.md",

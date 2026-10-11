@@ -1,6 +1,6 @@
 [package]
 name = "ai-workbench"
-version = "1.0.1"
+version = "1.0.2"
 description = "Local-first multimodal AI workbench"
 edition = "2021"
 

@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue.svg" alt="License"></a>
-  <a href="https://github.com/rowanjove/modeldeck/releases"><img src="https://img.shields.io/badge/Release-v1.0.1-green.svg" alt="Release"></a>
+  <a href="https://github.com/rowanjove/ModelDeck/releases"><img src="https://img.shields.io/badge/Release-v1.0.2-green.svg" alt="Release"></a>
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg?logo=windows" alt="Platform">
   <img src="https://img.shields.io/badge/Rust-Tauri%20v2-black.svg?logo=tauri" alt="Tauri v2">
   <img src="https://img.shields.io/badge/Frontend-React%2019%20%2B%20TS-61DAFB.svg?logo=react" alt="React 19">

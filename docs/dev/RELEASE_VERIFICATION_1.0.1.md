@@ -6,7 +6,7 @@
 
 备份文件覆盖、重启后的永久排队、Provider 地址变更沿用旧密钥、工具确认参数与执行次数边界、旧安装器归档、版本锁文件同步。
 
-保留当前工作树 release profile 的 `opt-level = 3`、`panic = "abort"`，未恢复原来的 LTO/strip 设置。首次完整发布编译出现 LLVM 内存不足；为完成构建，仅对主程序包增加 `opt-level = 1`、`codegen-units = 256` 的覆盖，依赖仍使用优化级别 3，构建并发限制为 1。该调整影响编译与性能优化，不改变功能配置；没有以性能基准证明与原优化级别的等价性。
+保留当前工作树 release profile 的 `opt-level = 3`、`panic = "abort"`，未恢复原来的 LTO/codegen-units/strip 设置。首次发布编译出现 LLVM 内存不足，临时降低优化后发现 EXE 体积为 555.60 MB，PE `.rdata` 超过 569 MB：前端目录中残留的历史安装器被当作静态资源嵌入。最终修复将 Vite 输出与 Tauri `frontendDist` 对齐为 `dist/frontend`，发布归档继续位于 `dist/windows`，恢复主程序优化级别 3，构建并发限制为 1。临时大体积构建不用于发布。
 
 ## 验证
 

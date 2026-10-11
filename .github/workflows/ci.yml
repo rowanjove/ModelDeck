@@ -120,6 +120,7 @@ jobs:
         run: npx @tauri-apps/cli build --bundles nsis msi --ci --no-sign
         env:
           CI: true
+          CARGO_BUILD_JOBS: "1"
 
       - name: Finalize Windows Release & Generate Checksums
         run: node scripts/finalize-release.cjs

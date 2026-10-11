@@ -130,7 +130,7 @@ if (fs.existsSync(targetSetup)) {
 }
 
 if (fs.existsSync(optionalDir)) {
-  for (const f of fs.readdirSync(optionalDir)) {
+  for (const f of fs.readdirSync(optionalDir).filter(name => name.startsWith(`ModelDeck_${version}_x64_`) && name.endsWith('.msi'))) {
     recordFile(path.join(optionalDir, f), `dist/windows/optional/${f}`);
   }
 }

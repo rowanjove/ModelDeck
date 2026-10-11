@@ -23,7 +23,27 @@
 | 独立风险终审 | SHIP，无 P0/P1 阻断 |
 | 当前版本安装器缺失时的归档保护 | 按预期失败，未采用旧版安装器 |
 
-执行环境：Windows 10 x64、Node.js 24.13.0、Rust/Cargo 1.93.1（MSVC）。打包与冒烟结果在完成后补充。
+执行环境：Windows 10 x64、Node.js 24.13.0、Rust/Cargo 1.93.1（MSVC）。
+
+## 打包与运行时验证
+
+最终构建使用 `CARGO_BUILD_JOBS=1 npm run tauri -- build --bundles nsis msi --ci --no-sign`，应用源码对应提交 `97371391506364e69b16d27ccb4aef95d1dca7ea`，其后提交仅补充核验脚本和记录。
+
+| 检查 | 结果 |
+|---|---|
+| 前端资源边界 | 22 个文件，943,203 字节，不含 EXE/MSI/ZIP 等分发文件 |
+| Portable EXE | 13,381,120 字节（12.76 MiB），ProductVersion=1.0.1 |
+| Portable ZIP | 5,729,445 字节（5.46 MiB），仅含 ModelDeck.exe 和 README.txt |
+| NSIS | 4,311,210 字节（4.11 MiB） |
+| 英文 MSI | 6,123,520 字节，内部 ProductVersion=1.0.1 |
+| 中文 MSI | 6,119,424 字节，内部 ProductVersion=1.0.1 |
+| 中文/空格路径与不同工作目录启动 | 通过 |
+| 移动 EXE 后启动并复用隔离数据库 | 通过 |
+| 只读 EXE 属性下启动 | 通过；不代表只读目录 ACL 测试 |
+| 原生 EXE 重启恢复 | 排队任务→interrupted；提交未决→unknown_submission/possible；远端任务→interrupted 并保留远端 ID |
+| 实际数据库 | 最大迁移号 23；integrity_check=ok；foreign_key_check 无违规 |
+
+产物位于 `release-dist/1.0.1`，SHA-256 见 `SHA256SUMS.txt`。Portable 与本次构建的原始 EXE 哈希一致。实际包体已从临时错误构建的 555.60 MiB 恢复至 12.76 MiB；最终保留优化级别 3。
 
 ## 边界
 

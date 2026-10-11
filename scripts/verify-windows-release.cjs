@@ -47,7 +47,10 @@ async function main() {
   const versions = checkVersions();
   assert(versions.success, 'Version mismatch');
   evidence.version = versions.version;
-  for (const file of [portable, setup]) assert(fs.statSync(file).size > 5 * 1024 * 1024, `Missing/invalid artifact: ${file}`);
+  for (const file of [portable, setup]) {
+    assert(fs.statSync(file).size > 64 * 1024, `Missing/invalid artifact: ${file}`);
+    assert.equal(fs.readFileSync(file).subarray(0, 2).toString('ascii'), 'MZ', `Invalid PE executable: ${file}`);
+  }
   const productVersion = execFileSync('powershell', ['-NoProfile', '-Command',
     '(Get-Item -LiteralPath $env:MODELDECK_VERIFY_EXE).VersionInfo.ProductVersion'], {
     env: { ...process.env, MODELDECK_VERIFY_EXE: portable }, windowsHide: true, encoding: 'utf8'
